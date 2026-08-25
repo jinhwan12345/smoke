@@ -4,16 +4,19 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.0.0 <4.0.0'
+  sdk: '>=3.5.0 <4.0.0'
 
 dependencies:
   flutter:
     sdk: flutter
   flutter_map: ^7.0.2
   latlong2: ^0.9.1
-  geolocator: ^13.0.2
+  geolocator: ^13.0.4
   permission_handler: ^11.3.1
   http: ^1.2.1
+
+dependency_overrides:
+  geolocator_android: ^5.0.3
 
 dev_dependencies:
   flutter_test:

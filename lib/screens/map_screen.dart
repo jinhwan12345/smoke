@@ -34,18 +34,15 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _initialize() async {
-    // 1. 흡연구역 데이터 로드
     final areas = await _areaService.loadSmokingAreas();
     setState(() {
       _allAreas = areas;
     });
 
-    // 2. 위치 권한 및 초기 위치 설정
     await LocationService.requestLocationPermission();
     Position initialPos = await LocationService.getCurrentPosition();
     _handleNewPosition(initialPos);
 
-    // 3. 실시간 위치 스트림 구독
     _positionStream = LocationService.getPositionStream().listen((pos) {
       _handleNewPosition(pos);
     });
@@ -140,13 +137,11 @@ class _MapScreenState extends State<MapScreen> {
           ? const Center(child: CircularProgressIndicator())
           : Stack(
               children: [
-                // 1. 지도 뷰 or 리스트 뷰
                 if (_showListView)
                   _buildNearbyListView()
                 else
                   _buildMapView(userLatLng),
 
-                // 2. 상단 흡연구역 여부 실시간 안내 배너
                 Positioned(
                   top: 8,
                   left: 0,
@@ -175,7 +170,7 @@ class _MapScreenState extends State<MapScreen> {
                 FloatingActionButton.small(
                   heroTag: 'zoomIn',
                   backgroundColor: Colors.white,
-                  foregroundColor: Colors.black86,
+                  foregroundColor: Colors.black87,
                   onPressed: () {
                     final currentZoom = _mapController.camera.zoom;
                     _mapController.move(_mapController.camera.center, currentZoom + 1);
@@ -186,7 +181,7 @@ class _MapScreenState extends State<MapScreen> {
                 FloatingActionButton.small(
                   heroTag: 'zoomOut',
                   backgroundColor: Colors.white,
-                  foregroundColor: Colors.black86,
+                  foregroundColor: Colors.black87,
                   onPressed: () {
                     final currentZoom = _mapController.camera.zoom;
                     _mapController.move(_mapController.camera.center, currentZoom - 1);
@@ -206,7 +201,6 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
-  // 지도 위젯
   Widget _buildMapView(LatLng userLatLng) {
     return FlutterMap(
       mapController: _mapController,
@@ -223,7 +217,6 @@ class _MapScreenState extends State<MapScreen> {
           tileProvider: NetworkTileProvider(),
         ),
 
-        // 흡연구역 유효 반경 Circle 레이어
         CircleLayer(
           circles: _allAreas.map((area) {
             final isCurrentTarget = _checkResult?.currentArea?.id == area.id;
@@ -232,18 +225,16 @@ class _MapScreenState extends State<MapScreen> {
               radius: area.radius,
               useRadiusInMeter: true,
               color: isCurrentTarget
-                  ? Colors.green.withValues(alpha: 0.45)
-                  : Colors.orange.withValues(alpha: 0.25),
+                  ? Colors.green.withOpacity(0.45)
+                  : Colors.orange.withOpacity(0.25),
               borderColor: isCurrentTarget ? Colors.green : Colors.orange,
               borderStrokeWidth: isCurrentTarget ? 3.0 : 1.5,
             );
           }).toList(),
         ),
 
-        // 마커 레이어
         MarkerLayer(
           markers: [
-            // 현재 사용자 위치 마커
             Marker(
               point: userLatLng,
               width: 50,
@@ -251,7 +242,6 @@ class _MapScreenState extends State<MapScreen> {
               child: _buildUserLocationMarker(),
             ),
 
-            // 흡연구역 마커들
             ..._allAreas.map((area) {
               final isCurrent = _checkResult?.currentArea?.id == area.id;
               return Marker(
@@ -296,7 +286,7 @@ class _MapScreenState extends State<MapScreen> {
           width: 38,
           height: 38,
           decoration: BoxDecoration(
-            color: Colors.blue.withValues(alpha: 0.25),
+            color: Colors.blue.withOpacity(0.25),
             shape: BoxShape.circle,
           ),
         ),
