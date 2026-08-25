@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>스모크 존 파인더 (Smoke Finder)</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="스모크파인더">
+  <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3055/3055815.png">
+  
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Supabase 공식 JS SDK -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Supabase 설정 파일 -->
+  <script src="supabase_config.js"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      background-color: #0f172a;
+      overflow: hidden;
+    }
+    header {
+      background-color: #0f172a;
+      color: white;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #1e293b;
+      z-index: 1000;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 18px;
+      font-weight: bold;
+    }
+    .header-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .btn {
+      background-color: #334155;
+      color: white;
+      border: none;
+      padding: 9px 15px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+    .btn:hover {
+      background-color: #475569;
+    }
+    .btn-primary {
+      background-color: #2563eb;
+    }
+    .btn-primary:hover {
+      background-color: #1d4ed8;
+    }
+    .btn-primary:active {
+      transform: scale(0.96);
+    }
+    #main-container {
+      position: relative;
+      flex: 1;
+      width: 100%;
+      height: 100%;
+    }
+    #map {
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+    }
+    /* 실시간 지오펜싱 상태 배너 */
+    #status-banner {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      right: 16px;
+      max-width: 520px;
+      margin: 0 auto;
+      background-color: #c62828;
+      color: white;
+      padding: 14px 18px;
+      border-radius: 16px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      transition: background-color 0.3s ease;
+    }
+    #status-banner.inside {
+      background-color: #2e7d32;
+    }
+    #status-banner.loading {
+      background-color: #475569;
+    }
+    .status-icon {
+      font-size: 30px;
+    }
+    .status-info {
+      flex: 1;
+    }
+    .status-title {
+      font-size: 15px;
+      font-weight: bold;
+      margin-bottom: 2px;
+    }
+    .status-desc {
+      font-size: 12px;
+      opacity: 0.9;
+    }
+    /* 리스트 뷰 오버레이 */
+    #list-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #f8fafc;
+      z-index: 999;
+      display: none;
+      flex-direction: column;
+      padding: 90px 20px 20px 20px;
+      overflow-y: auto;
+    }
+    .list-item {
+      background: white;
+      padding: 16px;
+      border-radius: 12px;
+      margin-bottom: 12px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+      border: 1px solid #e2e8f0;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .list-item:hover {
+      border-color: #2563eb;
+    }
+
+    /* 우측 하단 컨트롤 영역: 여백 3px */
+    .leaflet-bottom.leaflet-right {
+      right: 3px !important;
+      bottom: 3px !important;
+      margin: 0 !important;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* 좌측 하단 저작권(Attribution): 왼쪽 아래 화면 끝에 딱 붙이기 */
+    .leaflet-bottom.leaflet-left {
+      left: 0 !important;
+      bottom: 0 !important;
+      margin: 0 !important;
+    }
+    .leaflet-control-attribution {
+      margin: 0 !important;
+      padding: 2px 6px !important;
+      font-size: 10px !important;
+      background: rgba(255, 255, 255, 0.75) !important;
+      border-top-right-radius: 4px;
+    }
+
+    /* Leaflet 줌 컨트롤 스타일 */
+    .leaflet-control-zoom {
+      margin: 0 !important;
+      border: none !important;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2) !important;
+      border-radius: 10px !important;
+      overflow: hidden;
+    }
+    .leaflet-control-zoom a {
+      width: 40px !important;
+      height: 40px !important;
+      line-height: 40px !important;
+      font-size: 20px !important;
+      color: #1e293b !important;
+      background-color: white !important;
+      transition: background-color 0.2s;
+    }
+    .leaflet-control-zoom a:hover {
+      background-color: #f1f5f9 !important;
+    }
+
+    /* 내 위치로 플로팅 원형 버튼 (FAB) */
+    .fab-locate-btn {
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      background-color: #2563eb;
+      color: white;
+      border: 2px solid white;
+      box-shadow: 0 2px 8px rgba(37,99,235,0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      margin-bottom: 4px;
+    }
+    .fab-locate-btn:hover {
+      background-color: #1d4ed8;
+      transform: scale(1.06);
+    }
+    .fab-locate-btn:active {
+      transform: scale(0.92);
+    }
+
+    /* 토스트 알림 메시지 */
+    #toast-msg {
+      position: absolute;
+      bottom: 90px;
+      left: 50%;
+      transform: translateX(-50%);
+      background-color: rgba(15, 23, 42, 0.9);
+      color: white;
+      padding: 10px 20px;
+      border-radius: 24px;
+      font-size: 13px;
+      font-weight: 500;
+      z-index: 2000;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+      display: none;
+      animation: fadeIn 0.2s ease;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translate(-50%, 10px); }
+      to { opacity: 1; transform: translate(-50%, 0); }
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand">
+      <span>🚬</span>
+      <span>스모크 존 파인더</span>
+    </div>
+    <div class="header-actions">
+      <button class="btn" id="btn-toggle-list" onclick="toggleListView()">📋 목록 보기</button>
+      <button class="btn btn-primary" onclick="locateAndMove()">🎯 내 위치로</button>
+    </div>
+  </header>
+
+  <div id="main-container">
+    <!-- 상태 알림 배너 -->
+    <div id="status-banner" class="loading">
+      <div class="status-icon" id="banner-icon">🔄</div>
+      <div class="status-info">
+        <div class="status-title" id="banner-title">수파베이스 데이터 로딩 중...</div>
+        <div class="status-desc" id="banner-desc">클라우드 데이터베이스에서 흡연구역을 가져오는 중입니다.</div>
+      </div>
+    </div>
+
+    <!-- 토스트 메시지 -->
+    <div id="toast-msg">내 위치로 이동했습니다.</div>
+
+    <!-- 지도 -->
+    <div id="map"></div>
+
+    <!-- 목록 뷰 -->
+    <div id="list-overlay">
+      <h3 style="margin-bottom: 12px; color: #1e293b;" id="list-header-title">주변 흡연구역 목록 (Supabase DB)</h3>
+      <div id="area-list-container"></div>
+    </div>
+  </div>
+
+  <script>
+    let smokingAreas = [];
+    let mapLayers = [];
+
+    // 현재 사용자 좌표 (기본값: 대구 북구 검단로 116-5)
+    let userLat = 35.90682384;
+    let userLng = 128.62055516;
+
+    // 1. OpenStreetMap 무료 지도 초기화
+    const map = L.map('map', {
+      zoomControl: false,
+      attributionControl: false
+    }).setView([userLat, userLng], 17);
+
+    // 좌측 하단에 저작권(Attribution) 배치
+    L.control.attribution({
+      position: 'bottomleft'
+    }).addTo(map);
+
+    // 줌 컨트롤 추가 (오른쪽 하단 3px 여백)
+    const zoomControl = L.control.zoom({
+      position: 'bottomright'
+    }).addTo(map);
+
+    // 내 위치 바로가기 원형 버튼을 줌 컨트롤 위에 커스텀 추가
+    const locateControl = L.Control.extend({
+      options: { position: 'bottomright' },
+      onAdd: function() {
+        const btn = L.DomUtil.create('button', 'fab-locate-btn');
+        btn.innerHTML = '🎯';
+        btn.title = '내 위치로 이동';
+        btn.onclick = function(e) {
+          e.stopPropagation();
+          locateAndMove();
+        };
+        return btn;
+      }
+    });
+    map.addControl(new locateControl());
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    // 사용자 위치 마커
+    const userIcon = L.divIcon({
+      className: 'user-marker',
+      html: '<div style="background-color:#2563eb; width:22px; height:22px; border-radius:50%; border:3px solid white; box-shadow:0 0 12px rgba(37,99,235,0.9);"></div>',
+      iconSize: [22, 22],
+      iconAnchor: [11, 11]
+    });
+    let userMarker = L.marker([userLat, userLng], { icon: userIcon }).addTo(map);
+
+    // 토스트 알림 표시 함수
+    function showToast(text) {
+      const toast = document.getElementById('toast-msg');
+      toast.textContent = text;
+      toast.style.display = 'block';
+      setTimeout(() => {
+        toast.style.display = 'none';
+      }, 2000);
+    }
+
+    // 2. 실시간 GPS 추적 (watchPosition으로 항상 최신 좌표 유지)
+    if (navigator.geolocation) {
+      navigator.geolocation.watchPosition(
+        (pos) => {
+          userLat = pos.coords.latitude;
+          userLng = pos.coords.longitude;
+          userMarker.setLatLng([userLat, userLng]);
+          updateLocationState(userLat, userLng);
+        },
+        (err) => {
+          console.warn('GPS watchPosition 에러:', err);
+        },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 10000,
+          timeout: 5000
+        }
+      );
+    }
+
+    // 3. "내 위치로" 버튼 클릭 시: 지체 없이 100% 내 위치로 카메라 이동
+    function locateAndMove() {
+      // 목록 오버레이가 켜져 있으면 지도 모드로 전환
+      const overlay = document.getElementById('list-overlay');
+      if (overlay.style.display === 'flex') {
+        toggleListView();
+      }
+
+      // 1순위: 즉시 현재 알고 있는 좌표로 카메라 이동 (즉각 반응)
+      map.setView([userLat, userLng], 17.5, { animate: true, duration: 0.8 });
+      userMarker.setLatLng([userLat, userLng]);
+      updateLocationState(userLat, userLng);
+      showToast('🎯 내 위치로 이동했습니다');
+
+      // 2순위: 최신 GPS 다시 갱신 시도
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            userLat = pos.coords.latitude;
+            userLng = pos.coords.longitude;
+            map.setView([userLat, userLng], 17.5, { animate: true, duration: 0.5 });
+            userMarker.setLatLng([userLat, userLng]);
+            updateLocationState(userLat, userLng);
+          },
+          (err) => {
+            // 실패하더라도 이미 이동했으므로 무시
+          },
+          {
+            enableHighAccuracy: true,
+            timeout: 4000,
+            maximumAge: 5000
+          }
+        );
+      }
+    }
+
+    // 4. Supabase DB에서 흡연구역 데이터 실시간 로드
+    async function loadDataFromSupabase() {
+      try {
+        if (!SUPABASE_CONFIG || SUPABASE_CONFIG.url.includes('YOUR_PROJECT_REF')) {
+          updateBannerUI(false, null, null, Infinity, 'Supabase 설정 필요: supabase_config.js에 URL과 Key를 입력해주세요.');
+          return;
+        }
+
+        const supabaseClient = supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey);
+        const { data, error } = await supabaseClient
+          .from('smoking_areas')
+          .select('*');
+
+        if (error) {
+          console.error('Supabase 조회 에러:', error);
+          updateBannerUI(false, null, null, Infinity, 'Supabase 연결 오류: ' + error.message);
+          return;
+        }
+
+        smokingAreas = (data || []).map(item => {
+          const name = item.area_nm || item.name || '지정 흡연구역';
+          const address = item.rdnmadr || item.lnmadr || item.address || '';
+          const type = item.area_se || item.type || '흡연구역';
+          const description = item.area_desc || item.description || (item.inst_nm ? `관리기관: ${item.inst_nm}` : '');
+          
+          let radius = 20.0;
+          if (item.area_ar && parseFloat(item.area_ar) > 0) {
+            radius = Math.max(8.0, Math.min(30.0, Math.sqrt(parseFloat(item.area_ar) / Math.PI) * 2));
+          } else if (item.radius) {
+            radius = parseFloat(item.radius);
+          }
+
+          return {
+            id: item.id,
+            name: name,
+            address: address,
+            latitude: parseFloat(item.latitude),
+            longitude: parseFloat(item.longitude),
+            radius: radius,
+            type: type,
+            description: description,
+            inst_nm: item.inst_nm || '',
+            fclty_knd: item.fclty_knd || ''
+          };
+        }).filter(item => !isNaN(item.latitude) && !isNaN(item.longitude));
+
+        renderMapMarkers();
+        updateLocationState(userLat, userLng);
+      } catch (err) {
+        console.error('데이터 로드 예외:', err);
+        updateBannerUI(false, null, null, Infinity, '데이터베이스 로드 중 오류가 발생했습니다.');
+      }
+    }
+
+    // 지도 위에 DB 마커 & 반경 그리기
+    function renderMapMarkers() {
+      mapLayers.forEach(layer => map.removeLayer(layer));
+      mapLayers = [];
+
+      smokingAreas.forEach(area => {
+        const circle = L.circle([area.latitude, area.longitude], {
+          color: '#f59e0b',
+          fillColor: '#fbbf24',
+          fillOpacity: 0.25,
+          radius: area.radius
+        }).addTo(map);
+        mapLayers.push(circle);
+
+        const smokeIcon = L.divIcon({
+          className: 'smoke-marker',
+          html: '<div style="background-color:#d97706; color:white; width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center; border:2px solid white; box-shadow:0 2px 6px rgba(0,0,0,0.3); font-size:16px;">🚬</div>',
+          iconSize: [32, 32],
+          iconAnchor: [16, 16]
+        });
+
+        const marker = L.marker([area.latitude, area.longitude], { icon: smokeIcon })
+          .addTo(map)
+          .bindPopup(`
+            <div style="font-family:sans-serif;">
+              <b style="font-size:14px;">${area.name}</b><br>
+              <span style="color:#64748b; font-size:12px;">${area.address}</span><br>
+              <span style="display:inline-block; margin-top:4px; padding:2px 6px; background:#e2e8f0; border-radius:4px; font-size:11px;">${area.type}</span>
+              ${area.inst_nm ? `<span style="color:#64748b; font-size:11px; margin-left:4px;">(${area.inst_nm})</span>` : ''}
+              <br><span style="color:#0284c7; font-size:11px; margin-top:2px; display:inline-block;">유효반경 약 ${Math.round(area.radius)}m</span>
+            </div>
+          `);
+        mapLayers.push(marker);
+      });
+    }
+
+    // Haversine 거리 계산
+    function calculateDistance(lat1, lon1, lat2, lon2) {
+      const R = 6371e3;
+      const φ1 = lat1 * Math.PI / 180;
+      const φ2 = lat2 * Math.PI / 180;
+      const Δφ = (lat2 - lat1) * Math.PI / 180;
+      const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+      const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+                Math.cos(φ1) * Math.cos(φ2) *
+                Math.sin(Δλ/2) * Math.sin(Δλ/2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      return R * c;
+    }
+
+    function updateLocationState(lat, lng) {
+      userLat = lat;
+      userLng = lng;
+      userMarker.setLatLng([lat, lng]);
+
+      let insideArea = null;
+      let nearestArea = null;
+      let minDistance = Infinity;
+
+      smokingAreas.forEach(area => {
+        const dist = calculateDistance(lat, lng, area.latitude, area.longitude);
+        if (dist < minDistance) {
+          minDistance = dist;
+          nearestArea = area;
+        }
+        if (dist <= area.radius) {
+          insideArea = area;
+        }
+      });
+
+      updateBannerUI(insideArea !== null, insideArea, nearestArea, minDistance);
+      renderList();
+    }
+
+    function updateBannerUI(isInside, insideArea, nearestArea, minDistance, customMsg) {
+      const banner = document.getElementById('status-banner');
+      const icon = document.getElementById('banner-icon');
+      const title = document.getElementById('banner-title');
+      const desc = document.getElementById('banner-desc');
+
+      banner.classList.remove('loading');
+
+      if (customMsg) {
+        banner.className = 'loading';
+        icon.textContent = '⚙️';
+        title.textContent = '안내';
+        desc.textContent = customMsg;
+        return;
+      }
+
+      if (isInside && insideArea) {
+        banner.className = 'inside';
+        icon.textContent = '🚬';
+        title.textContent = '현재 흡연구역 내부입니다';
+        desc.textContent = `${insideArea.name} (${insideArea.type}, 반경 약 ${Math.round(insideArea.radius)}m)`;
+      } else {
+        banner.className = '';
+        icon.textContent = '🚫';
+        title.textContent = '현재 금연구역(비흡연구역)입니다';
+        desc.textContent = nearestArea 
+          ? `가장 가까운 흡연구역: ${Math.round(minDistance)}m (${nearestArea.name})`
+          : '수파베이스 DB에 등록된 주변 흡연구역이 없습니다.';
+      }
+    }
+
+    function renderList() {
+      const container = document.getElementById('area-list-container');
+      container.innerHTML = '';
+
+      if (smokingAreas.length === 0) {
+        container.innerHTML = '<div style="color:#64748b; padding:20px; text-align:center;">수파베이스 DB에 등록된 흡연구역 데이터가 없습니다.</div>';
+        return;
+      }
+
+      const listWithDist = smokingAreas.map(area => ({
+        ...area,
+        distance: calculateDistance(userLat, userLng, area.latitude, area.longitude)
+      })).sort((a, b) => a.distance - b.distance);
+
+      listWithDist.forEach(area => {
+        const isInside = area.distance <= area.radius;
+        const item = document.createElement('div');
+        item.className = 'list-item';
+        item.innerHTML = `
+          <div>
+            <div style="font-weight:bold; font-size:15px; color:#1e293b;">${area.name}</div>
+            <div style="color:#64748b; font-size:12px; margin: 3px 0;">${area.address}</div>
+            <div style="color:${isInside ? '#16a34a' : '#2563eb'}; font-weight:600; font-size:13px;">
+              ${Math.round(area.distance)}m 거리 • ${area.type}
+            </div>
+          </div>
+          <button class="btn btn-primary" style="padding:6px 12px; font-size:12px;">이동</button>
+        `;
+        item.onclick = () => {
+          toggleListView();
+          map.setView([area.latitude, area.longitude], 18, { animate: true });
+        };
+        container.appendChild(item);
+      });
+    }
+
+    function toggleListView() {
+      const overlay = document.getElementById('list-overlay');
+      const btn = document.getElementById('btn-toggle-list');
+      if (overlay.style.display === 'flex') {
+        overlay.style.display = 'none';
+        btn.textContent = '📋 목록 보기';
+      } else {
+        overlay.style.display = 'flex';
+        btn.textContent = '🗺️ 지도 보기';
+      }
+    }
+
+    // 초기 실행
+    loadDataFromSupabase();
+  </script>
+</body>
+</html>
