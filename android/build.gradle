@@ -5,28 +5,12 @@ allprojects {
     }
 }
 
-rootProject.buildDir = '../build'
+rootProject.buildDir = "../build"
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
 }
 subprojects {
-    project.evaluationDependsOn(':app')
-}
-
-// 모든 플러그인(geolocator_android 등)에 compileSdkVersion 34 즉시 주입
-subprojects {
-    project.plugins.whenPluginAdded { plugin ->
-        if (plugin.class.name.startsWith("com.android.build.gradle.LibraryPlugin")) {
-            project.android {
-                compileSdkVersion 34
-                buildToolsVersion "34.0.0"
-                defaultConfig {
-                    minSdkVersion 21
-                    targetSdkVersion 34
-                }
-            }
-        }
-    }
+    project.evaluationDependsOn(":app")
 }
 
 tasks.register("clean", Delete) {
