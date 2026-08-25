@@ -13,6 +13,24 @@ subprojects {
     project.evaluationDependsOn(":app")
 }
 
+// geolocator_android 등 모든 플러그인 서브프로젝트에 compileSdkVersion 및 SDK 버전 자동 주입
+subprojects {
+    afterEvaluate { project ->
+        if (project.hasProperty("android")) {
+            project.android {
+                if (namespace == null) {
+                    namespace project.group
+                }
+                compileSdkVersion 34
+                defaultConfig {
+                    minSdkVersion 21
+                    targetSdkVersion 34
+                }
+            }
+        }
+    }
+}
+
 tasks.register("clean", Delete) {
     delete rootProject.buildDir
 }
