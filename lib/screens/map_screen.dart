@@ -1,7 +1,8 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:latlong2/latlong.dart' hide Path;
 import 'package:geolocator/geolocator.dart';
 import '../models/smoking_area.dart';
 import '../services/location_service.dart';
@@ -16,7 +17,7 @@ class MapScreen extends StatefulWidget {
   State<MapScreen> createState() => _MapScreenState();
 }
 
-class _MapScreenState extends State<MapScreen> {
+class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMixin {
   final MapController _mapController = MapController();
   final SmokingAreaService _areaService = SmokingAreaService();
 
@@ -26,6 +27,10 @@ class _MapScreenState extends State<MapScreen> {
   LocationCheckResult? _checkResult;
   bool _isLoading = true;
   bool _showListView = false;
+  double _currentRotation = 0.0;
+
+  AnimationController? _rotationAnimationController;
+  Animation<double>? _rotationAnimation;
 
   @override
   void initState() {
@@ -72,6 +77,51 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
+  void _resetRotation() {
+    final startRotation = _mapController.camera.rotation;
+
+    // 회전 각도를 [-180, 180] 범위로 정규화하여 최단 경로로 북쪽(0도) 정렬
+    double normalizedStart = startRotation % 360.0;
+    if (normalizedStart > 180.0) {
+      normalizedStart -= 360.0;
+    } else if (normalizedStart < -180.0) {
+      normalizedStart += 360.0;
+    }
+
+    if (normalizedStart.abs() < 0.1) {
+      _mapController.rotate(0.0);
+      setState(() {
+        _currentRotation = 0.0;
+      });
+      return;
+    }
+
+    _rotationAnimationController?.dispose();
+    _rotationAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+
+    _rotationAnimation = Tween<double>(
+      begin: normalizedStart,
+      end: 0.0,
+    ).animate(CurvedAnimation(
+      parent: _rotationAnimationController!,
+      curve: Curves.easeOutCubic,
+    ));
+
+    _rotationAnimation!.addListener(() {
+      if (_rotationAnimation != null) {
+        _mapController.rotate(_rotationAnimation!.value);
+        setState(() {
+          _currentRotation = _rotationAnimation!.value;
+        });
+      }
+    });
+
+    _rotationAnimationController!.forward();
+  }
+
   void _showAreaDetails(SmokingArea area) {
     double? dist;
     if (_currentPosition != null) {
@@ -96,6 +146,8 @@ class _MapScreenState extends State<MapScreen> {
   @override
   void dispose() {
     _positionStream?.cancel();
+    _rotationAnimationController?.dispose();
+    _mapController.dispose();
     super.dispose();
   }
 
@@ -160,6 +212,16 @@ class _MapScreenState extends State<MapScreen> {
                     },
                   ),
                 ),
+
+                if (!_showListView)
+                  Positioned(
+                    top: 110,
+                    right: 16,
+                    child: Tooltip(
+                      message: '방위 정렬 (북쪽 기준)',
+                      child: _buildCompassButton(),
+                    ),
+                  ),
               ],
             ),
       floatingActionButton: _showListView
@@ -209,6 +271,19 @@ class _MapScreenState extends State<MapScreen> {
         initialZoom: 17.0,
         minZoom: 5.0,
         maxZoom: 19.0,
+        interactionOptions: const InteractionOptions(
+          flags: InteractiveFlag.all,
+        ),
+        onPositionChanged: (camera, hasGesture) {
+          if (hasGesture && _rotationAnimationController?.isAnimating == true) {
+            _rotationAnimationController?.stop();
+          }
+          if ((_currentRotation - camera.rotation).abs() > 0.01) {
+            setState(() {
+              _currentRotation = camera.rotation;
+            });
+          }
+        },
       ),
       children: [
         TileLayer(
@@ -233,12 +308,15 @@ class _MapScreenState extends State<MapScreen> {
           }).toList(),
         ),
 
+        // MarkerLayer: rotate: false 로 설정하여 지도 회전 시 흡연구역 아이콘도 지도와 함께 회전하도록 함
         MarkerLayer(
+          rotate: false,
           markers: [
             Marker(
               point: userLatLng,
               width: 50,
               height: 50,
+              rotate: false,
               child: _buildUserLocationMarker(),
             ),
 
@@ -248,6 +326,7 @@ class _MapScreenState extends State<MapScreen> {
                 point: LatLng(area.latitude, area.longitude),
                 width: 44,
                 height: 44,
+                rotate: false,
                 child: GestureDetector(
                   onTap: () => _showAreaDetails(area),
                   child: Container(
@@ -275,6 +354,44 @@ class _MapScreenState extends State<MapScreen> {
           ],
         ),
       ],
+    );
+  }
+
+  Widget _buildCompassButton() {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: _resetRotation,
+        borderRadius: BorderRadius.circular(24),
+        child: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            shape: BoxShape.circle,
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black26,
+                blurRadius: 6,
+                offset: Offset(0, 2),
+              ),
+            ],
+            border: Border.all(
+              color: Colors.black12,
+              width: 1,
+            ),
+          ),
+          child: Center(
+            child: Transform.rotate(
+              angle: -_currentRotation * (math.pi / 180.0),
+              child: CustomPaint(
+                size: const Size(26, 26),
+                painter: _CompassNeedlePainter(),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -385,4 +502,76 @@ class _MapScreenState extends State<MapScreen> {
             ),
     );
   }
+}
+
+class _CompassNeedlePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final centerX = size.width / 2;
+    final centerY = size.height / 2;
+    final halfWidth = size.width * 0.22;
+
+    // 북쪽(N) 바늘 (밝은 빨간색)
+    final northPath = Path()
+      ..moveTo(centerX, 2)
+      ..lineTo(centerX + halfWidth, centerY)
+      ..lineTo(centerX, centerY - 1)
+      ..lineTo(centerX - halfWidth, centerY)
+      ..close();
+
+    final northPaint = Paint()
+      ..color = const Color(0xFFEF4444)
+      ..style = PaintingStyle.fill;
+    canvas.drawPath(northPath, northPaint);
+
+    // 북쪽 바늘 입체 음영 (더 짙은 빨간색)
+    final northRightPath = Path()
+      ..moveTo(centerX, 2)
+      ..lineTo(centerX + halfWidth, centerY)
+      ..lineTo(centerX, centerY)
+      ..close();
+    final northDarkPaint = Paint()
+      ..color = const Color(0xFFDC2626)
+      ..style = PaintingStyle.fill;
+    canvas.drawPath(northRightPath, northDarkPaint);
+
+    // 남쪽(S) 바늘 (밝은 회색)
+    final southPath = Path()
+      ..moveTo(centerX, size.height - 2)
+      ..lineTo(centerX + halfWidth, centerY)
+      ..lineTo(centerX, centerY + 1)
+      ..lineTo(centerX - halfWidth, centerY)
+      ..close();
+
+    final southPaint = Paint()
+      ..color = const Color(0xFF94A3B8)
+      ..style = PaintingStyle.fill;
+    canvas.drawPath(southPath, southPaint);
+
+    // 남쪽 바늘 입체 음영 (더 짙은 회색)
+    final southRightPath = Path()
+      ..moveTo(centerX, size.height - 2)
+      ..lineTo(centerX + halfWidth, centerY)
+      ..lineTo(centerX, centerY)
+      ..close();
+    final southDarkPaint = Paint()
+      ..color = const Color(0xFF64748B)
+      ..style = PaintingStyle.fill;
+    canvas.drawPath(southRightPath, southDarkPaint);
+
+    // 중앙 축 핀
+    final centerPaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(Offset(centerX, centerY), 2.5, centerPaint);
+
+    final centerBorderPaint = Paint()
+      ..color = const Color(0xFF334155)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.0;
+    canvas.drawCircle(Offset(centerX, centerY), 2.5, centerBorderPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
