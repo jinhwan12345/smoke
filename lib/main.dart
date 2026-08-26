@@ -12,7 +12,7 @@ class SmokeFinderApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Smoke Finder',
+      title: '담뱃불좀꺼줄래',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(

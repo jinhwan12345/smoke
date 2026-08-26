@@ -165,7 +165,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
             Icon(Icons.smoking_rooms, color: Colors.orangeAccent),
             SizedBox(width: 8),
             Text(
-              '스모크 존 파인더',
+              '담뱃불좀꺼줄래',
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
             ),
           ],

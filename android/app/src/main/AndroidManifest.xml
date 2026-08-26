@@ -10,7 +10,7 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <application
-        android:label="스모크존파인더"
+        android:label="담뱃불좀꺼줄래"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
