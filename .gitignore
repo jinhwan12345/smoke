@@ -31,6 +31,3 @@ migrate_working_dir/
 .pub/
 /build/
 
-# Node/Vercel
-node_modules/
-.vercel/

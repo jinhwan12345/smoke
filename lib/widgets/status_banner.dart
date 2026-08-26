@@ -3,12 +3,12 @@ import '../services/location_service.dart';
 
 class StatusBanner extends StatelessWidget {
   final LocationCheckResult? checkResult;
-  final VoidCallback? onNavigateToNearest;
+  final VoidCallback? onTap;
 
   const StatusBanner({
     super.key,
     required this.checkResult,
-    this.onNavigateToNearest,
+    this.onTap,
   });
 
   @override
@@ -26,7 +26,6 @@ class StatusBanner extends StatelessWidget {
     final statusTitle = isInside ? '현재 흡연구역 내부입니다 🚬' : '현재 금연구역(비흡연구역)입니다 🚫';
 
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
         color: primaryColor,
         borderRadius: BorderRadius.circular(16),
@@ -40,67 +39,66 @@ class StatusBanner extends StatelessWidget {
       ),
       child: Material(
         color: Colors.transparent,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.2),
-                  shape: BoxShape.circle,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    isInside ? Icons.smoking_rooms : Icons.smoke_free,
+                    color: Colors.white,
+                    size: 28,
+                  ),
                 ),
-                child: Icon(
-                  isInside ? Icons.smoking_rooms : Icons.smoke_free,
-                  color: Colors.white,
-                  size: 28,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      statusTitle,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    if (isInside && currentArea != null)
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
                       Text(
-                        currentArea.name,
-                        style: const TextStyle(color: Colors.white70, fontSize: 13),
-                        overflow: TextOverflow.ellipsis,
-                      )
-                    else if (!isInside && nearestArea != null)
-                      Text(
-                        '가장 가까운 흡연구역: ${distance.toInt()}m (${nearestArea.name})',
-                        style: const TextStyle(color: Colors.white70, fontSize: 13),
-                        overflow: TextOverflow.ellipsis,
-                      )
-                    else
-                      const Text(
-                        '주변에 등록된 흡연구역이 없습니다.',
-                        style: TextStyle(color: Colors.white70, fontSize: 13),
+                        statusTitle,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                  ],
+                      const SizedBox(height: 4),
+                      if (isInside && currentArea != null)
+                        Text(
+                          currentArea.name,
+                          style: const TextStyle(color: Colors.white70, fontSize: 13),
+                          overflow: TextOverflow.ellipsis,
+                        )
+                      else if (!isInside && nearestArea != null)
+                        Text(
+                          '가장 가까운 흡연구역: ${distance.toInt()}m (${nearestArea.name})',
+                          style: const TextStyle(color: Colors.white70, fontSize: 13),
+                          overflow: TextOverflow.ellipsis,
+                        )
+                      else
+                        const Text(
+                          '주변에 등록된 흡연구역이 없습니다.',
+                          style: TextStyle(color: Colors.white70, fontSize: 13),
+                        ),
+                    ],
+                  ),
                 ),
-              ),
-              if (!isInside && nearestArea != null && onNavigateToNearest != null)
-                IconButton(
-                  tooltip: '가장 가까운 곳 보기',
-                  icon: const Icon(Icons.near_me, color: Colors.white),
-                  onPressed: onNavigateToNearest,
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 }
+
