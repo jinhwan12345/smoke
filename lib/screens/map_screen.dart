@@ -381,7 +381,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
           ),
           child: Center(
             child: Transform.rotate(
-              angle: -_currentRotation * (math.pi / 180.0),
+              angle: _currentRotation * (math.pi / 180.0),
               child: CustomPaint(
                 size: const Size(26, 26),
                 painter: _CompassNeedlePainter(),
