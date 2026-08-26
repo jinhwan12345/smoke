@@ -11,7 +11,14 @@ import '../widgets/status_banner.dart';
 import '../widgets/area_detail_sheet.dart';
 
 class MapScreen extends StatefulWidget {
-  const MapScreen({super.key});
+  final List<SmokingArea>? preloadedAreas;
+  final Position? initialPosition;
+
+  const MapScreen({
+    super.key,
+    this.preloadedAreas,
+    this.initialPosition,
+  });
 
   @override
   State<MapScreen> createState() => _MapScreenState();
@@ -39,21 +46,27 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
   }
 
   Future<void> _initialize() async {
-    final areas = await _areaService.loadSmokingAreas();
-    setState(() {
-      _allAreas = areas;
-    });
+    if (widget.preloadedAreas != null && widget.initialPosition != null) {
+      _allAreas = widget.preloadedAreas!;
+      _handleNewPosition(widget.initialPosition!);
+      _isLoading = false;
+    } else {
+      final areas = await _areaService.loadSmokingAreas();
+      setState(() {
+        _allAreas = areas;
+      });
 
-    await LocationService.requestLocationPermission();
-    Position initialPos = await LocationService.getCurrentPosition();
-    _handleNewPosition(initialPos);
+      await LocationService.requestLocationPermission();
+      Position initialPos = await LocationService.getCurrentPosition();
+      _handleNewPosition(initialPos);
+
+      setState(() {
+        _isLoading = false;
+      });
+    }
 
     _positionStream = LocationService.getPositionStream().listen((pos) {
       _handleNewPosition(pos);
-    });
-
-    setState(() {
-      _isLoading = false;
     });
   }
 
@@ -159,63 +172,79 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
         : const LatLng(35.90682384, 128.62055516);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Row(
-          children: [
-            Icon(Icons.smoking_rooms, color: Colors.orangeAccent),
-            SizedBox(width: 8),
-            Text(
-              '담뱃불좀꺼줄래',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-            ),
-          ],
-        ),
-        backgroundColor: const Color(0xFF0F172A),
-        foregroundColor: Colors.white,
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: Icon(_showListView ? Icons.map_outlined : Icons.format_list_bulleted),
-            tooltip: _showListView ? '지도 보기' : '주변 목록 보기',
-            onPressed: () {
-              setState(() {
-                _showListView = !_showListView;
-              });
-            },
-          ),
-        ],
-      ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : Stack(
               children: [
+                // 1. 메인 지도 / 목록 뷰 (전체화면)
                 if (_showListView)
                   _buildNearbyListView()
                 else
                   _buildMapView(userLatLng),
 
-                Positioned(
-                  top: 8,
-                  left: 0,
-                  right: 0,
-                  child: StatusBanner(
-                    checkResult: _checkResult,
-                    onNavigateToNearest: () {
-                      if (_checkResult?.nearestArea != null) {
-                        final nearest = _checkResult!.nearestArea!;
-                        _mapController.move(
-                          LatLng(nearest.latitude, nearest.longitude),
-                          17.5,
-                        );
-                        _showAreaDetails(nearest);
-                      }
-                    },
-                  ),
-                ),
-
+                // 2. 상단 상태 배너 및 목록 보기 버튼 (헤더 대신 깔끔한 오버레이)
                 if (!_showListView)
                   Positioned(
-                    top: 110,
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: SafeArea(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // 상태 배너
+                            Expanded(
+                              child: StatusBanner(
+                                checkResult: _checkResult,
+                                onNavigateToNearest: () {
+                                  if (_checkResult?.nearestArea != null) {
+                                    final nearest = _checkResult!.nearestArea!;
+                                    _mapController.move(
+                                      LatLng(nearest.latitude, nearest.longitude),
+                                      17.5,
+                                    );
+                                    _showAreaDetails(nearest);
+                                  }
+                                },
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            // 목록 보기 토글 버튼
+                            Container(
+                              margin: const EdgeInsets.only(top: 8),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF0F172A),
+                                shape: BoxShape.circle,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.25),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 3),
+                                  ),
+                                ],
+                              ),
+                              child: IconButton(
+                                icon: const Icon(Icons.format_list_bulleted, color: Colors.white, size: 22),
+                                tooltip: '주변 목록 보기',
+                                onPressed: () {
+                                  setState(() {
+                                    _showListView = true;
+                                  });
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+
+                // 3. 방위 정렬(나침반) 버튼
+                if (!_showListView)
+                  Positioned(
+                    top: 130,
                     right: 16,
                     child: Tooltip(
                       message: '방위 정렬 (북쪽 기준)',
@@ -273,6 +302,8 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
         maxZoom: 19.0,
         interactionOptions: const InteractionOptions(
           flags: InteractiveFlag.all,
+          enableMultiFingerGestureRace: true,
+          rotationThreshold: 5.0,
         ),
         onPositionChanged: (camera, hasGesture) {
           if (hasGesture && _rotationAnimationController?.isAnimating == true) {
@@ -308,7 +339,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
           }).toList(),
         ),
 
-        // MarkerLayer: rotate: false 로 설정하여 지도 회전 시 흡연구역 아이콘도 지도와 함께 회전하도록 함
+        // MarkerLayer: rotate: false 로 설정하여 지도 회전 시 흡연구역 아이콘도 지도와 함께 회전
         MarkerLayer(
           rotate: false,
           markers: [
@@ -438,10 +469,26 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
       maxDistanceInMeters: 5000.0,
     );
 
-    return Container(
-      color: const Color(0xFFF8FAFC),
-      padding: const EdgeInsets.only(top: 90),
-      child: nearbyList.isEmpty
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8FAFC),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF0F172A),
+        foregroundColor: Colors.white,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            setState(() {
+              _showListView = false;
+            });
+          },
+        ),
+        title: const Text(
+          '주변 흡연구역 목록',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+        ),
+      ),
+      body: nearbyList.isEmpty
           ? const Center(child: Text('반경 5km 이내에 등록된 흡연구역이 없습니다.'))
           : ListView.builder(
               itemCount: nearbyList.length,
