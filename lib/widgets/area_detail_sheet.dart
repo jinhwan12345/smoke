@@ -12,8 +12,22 @@ class AreaDetailSheet extends StatelessWidget {
     this.distanceInMeters,
   });
 
+  void _copyToClipboard(BuildContext context, String text, String label) {
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('$label(이)가 클립보드에 복사되었습니다.'),
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final roadAddr = area.hasRoadAddress ? area.roadAddress : '도로명주소 정보 없음';
+    final lotAddr = area.hasLotAddress ? area.lotAddress : '지번주소 정보 없음';
+
     return Container(
       decoration: const BoxDecoration(
         color: Colors.white,
@@ -37,7 +51,7 @@ class AreaDetailSheet extends StatelessWidget {
           ),
           const SizedBox(height: 16),
 
-          // 제목 및 태그
+          // 제목 및 면적 정보
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -51,83 +65,154 @@ class AreaDetailSheet extends StatelessWidget {
                   ),
                 ),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE8F5E9),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: const Color(0xFF81C784)),
-                ),
-                child: Text(
-                  area.type,
-                  style: const TextStyle(
-                    color: Color(0xFF2E7D32),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
+              if (area.areaAr > 0)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE8F5E9),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: const Color(0xFF81C784)),
+                  ),
+                  child: Text(
+                    '면적 ${area.areaAr.toInt()}㎡',
+                    style: const TextStyle(
+                      color: Color(0xFF2E7D32),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
-              ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
 
-          // 주소
-          Row(
-            children: [
-              Icon(Icons.location_on_outlined, size: 18, color: Colors.grey[600]),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  area.address.isEmpty ? '상세 주소 정보 없음' : area.address,
-                  style: TextStyle(fontSize: 14, color: Colors.grey[700]),
+          // 1. 도로명 주소 카드
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF1F5F9),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2563EB),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Text(
+                    '도로명',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.copy, size: 16),
-                tooltip: '주소 복사',
-                onPressed: () {
-                  Clipboard.setData(ClipboardData(text: area.address));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('주소가 클립보드에 복사되었습니다.')),
-                  );
-                },
-              ),
-            ],
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    roadAddr,
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      color: area.hasRoadAddress ? const Color(0xFF1E293B) : Colors.grey[500],
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+                if (area.hasRoadAddress)
+                  IconButton(
+                    icon: const Icon(Icons.copy, size: 16, color: Color(0xFF64748B)),
+                    tooltip: '도로명주소 복사',
+                    constraints: const BoxConstraints(),
+                    padding: const EdgeInsets.all(6),
+                    onPressed: () => _copyToClipboard(context, area.roadAddress, '도로명주소'),
+                  ),
+              ],
+            ),
           ),
+          const SizedBox(height: 8),
 
-          // 거리 & 유효 반경
+          // 2. 지번 주소 카드
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF1F5F9),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0D9488),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Text(
+                    '지번',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    lotAddr,
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      color: area.hasLotAddress ? const Color(0xFF1E293B) : Colors.grey[500],
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+                if (area.hasLotAddress)
+                  IconButton(
+                    icon: const Icon(Icons.copy, size: 16, color: Color(0xFF64748B)),
+                    tooltip: '지번주소 복사',
+                    constraints: const BoxConstraints(),
+                    padding: const EdgeInsets.all(6),
+                    onPressed: () => _copyToClipboard(context, area.lotAddress, '지번주소'),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // 거리 & 유효 반경 & 기준일자
           Row(
             children: [
-              Icon(Icons.straighten, size: 18, color: Colors.grey[600]),
+              Icon(Icons.straighten, size: 17, color: Colors.grey[600]),
               const SizedBox(width: 6),
               if (distanceInMeters != null)
                 Text(
-                  '현재 위치로부터 ${distanceInMeters!.toInt()}m 거리',
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.blueAccent),
+                  '${distanceInMeters!.toInt()}m 거리',
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF2563EB),
+                  ),
                 ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 8),
               Text(
                 '• 유효 반경 ${area.radius.toInt()}m',
                 style: TextStyle(fontSize: 13, color: Colors.grey[600]),
               ),
+              const Spacer(),
+              if (area.refDate.isNotEmpty)
+                Text(
+                  '기준일: ${area.refDate}',
+                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                ),
             ],
           ),
-
-          if (area.description.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.grey[100],
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                area.description,
-                style: TextStyle(fontSize: 13, color: Colors.grey[800]),
-              ),
-            ),
-          ],
 
           const SizedBox(height: 20),
           SizedBox(

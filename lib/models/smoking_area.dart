@@ -2,45 +2,53 @@ import 'dart:math' as math;
 
 class SmokingArea {
   final String id;
-  final String name;        // area_nm
-  final String address;     // rdnmadr or lnmadr
-  final double latitude;    // latitude
-  final double longitude;   // longitude
-  final double radius;      // area_ar (면적 기반 계산 또는 기본 20m)
-  final String type;        // area_se
-  final String description; // area_desc
-  final String? instNm;     // inst_nm (관리기관)
-  final String? fcltyKnd;   // fclty_knd
+  final String name;          // area_nm (흡연구역명)
+  final double areaAr;        // area_ar (면적 ㎡)
+  final double latitude;      // latitude (위도)
+  final double longitude;     // longitude (경도)
+  final String lotAddress;    // lnmadr (지번주소)
+  final String roadAddress;   // rdnmadr (도로명주소)
+  final String refDate;       // ref_date (데이터 기준일자)
+  final double radius;        // 면적 기반 유효 반경(m)
 
   SmokingArea({
     required this.id,
     required this.name,
-    required this.address,
+    required this.areaAr,
     required this.latitude,
     required this.longitude,
-    this.radius = 20.0,
-    this.type = '개방형',
-    this.description = '',
-    this.instNm,
-    this.fcltyKnd,
+    required this.lotAddress,
+    required this.roadAddress,
+    required this.refDate,
+    required this.radius,
   });
 
-  factory SmokingArea.fromJson(Map<String, dynamic> json) {
-    // 새로운 공공데이터 표준 컬럼 매핑
-    final name = json['area_nm']?.toString() ?? json['name']?.toString() ?? '지정 흡연구역';
-    final address = json['rdnmadr']?.toString() ?? json['lnmadr']?.toString() ?? json['address']?.toString() ?? '';
-    final type = json['area_se']?.toString() ?? json['type']?.toString() ?? '흡연구역';
-    final desc = json['area_desc']?.toString() ?? json['description']?.toString() ?? '';
-    final inst = json['inst_nm']?.toString();
-    final fclty = json['fclty_knd']?.toString();
+  // 대표 주소 (도로명 우선, 없으면 지번)
+  String get address {
+    if (roadAddress.isNotEmpty) return roadAddress;
+    if (lotAddress.isNotEmpty) return lotAddress;
+    return '주소 정보 없음';
+  }
 
-    // 면적(area_ar)으로부터 반경 계산
-    double rad = 20.0;
+  bool get hasRoadAddress => roadAddress.trim().isNotEmpty;
+  bool get hasLotAddress => lotAddress.trim().isNotEmpty;
+
+  factory SmokingArea.fromJson(Map<String, dynamic> json) {
+    final name = json['area_nm']?.toString() ?? json['name']?.toString() ?? '지정 흡연구역';
+    final lotAddr = json['lnmadr']?.toString() ?? '';
+    final roadAddr = json['rdnmadr']?.toString() ?? json['address']?.toString() ?? '';
+    final refDate = json['ref_date']?.toString() ?? '';
+
+    // 면적(area_ar) 파싱
+    double ar = 0.0;
     if (json['area_ar'] != null) {
-      double ar = (json['area_ar'] as num).toDouble();
-      if (ar > 0) {
-        rad = (math.sqrt(ar / math.pi) * 2).clamp(8.0, 30.0);
-      }
+      ar = (json['area_ar'] as num).toDouble();
+    }
+
+    // 면적 기반 반경 계산 (최소 8m ~ 최대 30m, 기본 20m)
+    double rad = 20.0;
+    if (ar > 0) {
+      rad = (math.sqrt(ar / math.pi) * 2).clamp(8.0, 30.0);
     } else if (json['radius'] != null) {
       rad = (json['radius'] as num).toDouble();
     }
@@ -48,14 +56,13 @@ class SmokingArea {
     return SmokingArea(
       id: json['id']?.toString() ?? '',
       name: name,
-      address: address,
+      areaAr: ar,
       latitude: (json['latitude'] as num).toDouble(),
       longitude: (json['longitude'] as num).toDouble(),
+      lotAddress: lotAddr,
+      roadAddress: roadAddr,
+      refDate: refDate,
       radius: rad,
-      type: type,
-      description: desc,
-      instNm: inst,
-      fcltyKnd: fclty,
     );
   }
 
@@ -63,13 +70,12 @@ class SmokingArea {
     return {
       'id': id,
       'area_nm': name,
-      'rdnmadr': address,
+      'area_ar': areaAr,
       'latitude': latitude,
       'longitude': longitude,
-      'area_se': type,
-      'area_desc': description,
-      'inst_nm': instNm,
-      'fclty_knd': fcltyKnd,
+      'lnmadr': lotAddress,
+      'rdnmadr': roadAddress,
+      'ref_date': refDate,
     };
   }
 }

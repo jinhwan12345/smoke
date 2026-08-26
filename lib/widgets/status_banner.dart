@@ -73,7 +73,7 @@ class StatusBanner extends StatelessWidget {
                     const SizedBox(height: 4),
                     if (isInside && currentArea != null)
                       Text(
-                        '${currentArea.name} (${currentArea.type})',
+                        currentArea.name,
                         style: const TextStyle(color: Colors.white70, fontSize: 13),
                         overflow: TextOverflow.ellipsis,
                       )

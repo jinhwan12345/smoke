@@ -493,7 +493,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                         Text(area.address, style: TextStyle(color: Colors.grey[600], fontSize: 12)),
                         const SizedBox(height: 2),
                         Text(
-                          '${dist.toInt()}m 거리 • ${area.type}',
+                          '${dist.toInt()}m 거리 • 반경 ${area.radius.toInt()}m',
                           style: const TextStyle(
                             color: Color(0xFF2563EB),
                             fontWeight: FontWeight.w600,
