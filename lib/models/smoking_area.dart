@@ -34,7 +34,7 @@ class SmokingArea {
   bool get hasLotAddress => lotAddress.trim().isNotEmpty;
 
   factory SmokingArea.fromJson(Map<String, dynamic> json) {
-    final name = json['area_nm']?.toString() ?? json['name']?.toString() ?? '지정 흡연구역';
+    final name = json['area_nm']?.toString() ?? json['area_desc']?.toString() ?? json['name']?.toString() ?? '지정 흡연구역';
     final lotAddr = json['lnmadr']?.toString() ?? '';
     final roadAddr = json['rdnmadr']?.toString() ?? json['address']?.toString() ?? '';
     final refDate = json['ref_date']?.toString() ?? '';
