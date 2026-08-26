@@ -182,7 +182,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                 else
                   _buildMapView(userLatLng),
 
-                // 2. 상단 상태 배너 및 목록 보기 버튼 (헤더 대신 깔끔한 오버레이)
+                // 2. 상단 상태 배너
                 if (!_showListView)
                   Positioned(
                     top: 0,
@@ -191,51 +191,18 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                     child: SafeArea(
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // 상태 배너
-                            Expanded(
-                              child: StatusBanner(
-                                checkResult: _checkResult,
-                                onNavigateToNearest: () {
-                                  if (_checkResult?.nearestArea != null) {
-                                    final nearest = _checkResult!.nearestArea!;
-                                    _mapController.move(
-                                      LatLng(nearest.latitude, nearest.longitude),
-                                      17.5,
-                                    );
-                                    _showAreaDetails(nearest);
-                                  }
-                                },
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            // 목록 보기 토글 버튼
-                            Container(
-                              margin: const EdgeInsets.only(top: 8),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF0F172A),
-                                shape: BoxShape.circle,
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.25),
-                                    blurRadius: 8,
-                                    offset: const Offset(0, 3),
-                                  ),
-                                ],
-                              ),
-                              child: IconButton(
-                                icon: const Icon(Icons.format_list_bulleted, color: Colors.white, size: 22),
-                                tooltip: '주변 목록 보기',
-                                onPressed: () {
-                                  setState(() {
-                                    _showListView = true;
-                                  });
-                                },
-                              ),
-                            ),
-                          ],
+                        child: StatusBanner(
+                          checkResult: _checkResult,
+                          onNavigateToNearest: () {
+                            if (_checkResult?.nearestArea != null) {
+                              final nearest = _checkResult!.nearestArea!;
+                              _mapController.move(
+                                LatLng(nearest.latitude, nearest.longitude),
+                                17.5,
+                              );
+                              _showAreaDetails(nearest);
+                            }
+                          },
                         ),
                       ),
                     ),
@@ -339,15 +306,15 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
           }).toList(),
         ),
 
-        // MarkerLayer: rotate: false 로 설정하여 지도 회전 시 흡연구역 아이콘도 지도와 함께 회전
+        // MarkerLayer: rotate: true 로 설정하여 지도 회전 시에도 아이콘이 항상 정방향(수직)으로 똑같이 보이도록 역회전 보정
         MarkerLayer(
-          rotate: false,
+          rotate: true,
           markers: [
             Marker(
               point: userLatLng,
               width: 50,
               height: 50,
-              rotate: false,
+              rotate: true,
               child: _buildUserLocationMarker(),
             ),
 
@@ -357,7 +324,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                 point: LatLng(area.latitude, area.longitude),
                 width: 44,
                 height: 44,
-                rotate: false,
+                rotate: true,
                 child: GestureDetector(
                   onTap: () => _showAreaDetails(area),
                   child: Container(
