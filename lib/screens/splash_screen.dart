@@ -165,10 +165,25 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const Icon(
-                            Icons.warning_amber_rounded,
-                            color: Color(0xFFEF4444),
-                            size: 22,
+                          Container(
+                            width: 24,
+                            height: 24,
+                            decoration: const BoxDecoration(
+                              color: Colors.white,
+                              shape: BoxShape.circle,
+                            ),
+                            padding: const EdgeInsets.all(2),
+                            child: ClipOval(
+                              child: Image.asset(
+                                'assets/images/no_smoke.png',
+                                fit: BoxFit.contain,
+                                errorBuilder: (context, error, stackTrace) => const Icon(
+                                  Icons.warning_amber_rounded,
+                                  color: Color(0xFFEF4444),
+                                  size: 20,
+                                ),
+                              ),
+                            ),
                           ),
                           const SizedBox(width: 8),
                           const Text(

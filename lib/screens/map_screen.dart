@@ -322,8 +322,9 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                 child: GestureDetector(
                   onTap: () => _showAreaDetails(area),
                   child: Container(
+                    padding: const EdgeInsets.all(4),
                     decoration: BoxDecoration(
-                      color: isCurrent ? const Color(0xFF2E7D32) : const Color(0xFFD97706),
+                      color: Colors.white,
                       shape: BoxShape.circle,
                       boxShadow: const [
                         BoxShadow(
@@ -332,12 +333,21 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                           offset: Offset(0, 2),
                         ),
                       ],
-                      border: Border.all(color: Colors.white, width: 2),
+                      border: Border.all(
+                        color: isCurrent ? const Color(0xFF2E7D32) : const Color(0xFFD97706),
+                        width: isCurrent ? 3.0 : 2.0,
+                      ),
                     ),
-                    child: const Icon(
-                      Icons.smoking_rooms,
-                      color: Colors.white,
-                      size: 24,
+                    child: ClipOval(
+                      child: Image.asset(
+                        'assets/images/app_logo.png',
+                        fit: BoxFit.contain,
+                        errorBuilder: (context, error, stackTrace) => Icon(
+                          Icons.smoking_rooms,
+                          color: isCurrent ? const Color(0xFF2E7D32) : const Color(0xFFD97706),
+                          size: 22,
+                        ),
+                      ),
                     ),
                   ),
                 ),

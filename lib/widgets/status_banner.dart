@@ -47,15 +47,32 @@ class StatusBanner extends StatelessWidget {
             child: Row(
               children: [
                 Container(
-                  padding: const EdgeInsets.all(8),
+                  width: 46,
+                  height: 46,
+                  padding: const EdgeInsets.all(4),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.2),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    isInside ? Icons.smoking_rooms : Icons.smoke_free,
                     color: Colors.white,
-                    size: 28,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.18),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: ClipOval(
+                    child: Image.asset(
+                      isInside
+                          ? 'assets/images/app_logo.png'
+                          : 'assets/images/no_smoke.png',
+                      fit: BoxFit.contain,
+                      errorBuilder: (context, error, stackTrace) => Icon(
+                        isInside ? Icons.smoking_rooms : Icons.smoke_free,
+                        color: primaryColor,
+                        size: 26,
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 14),
