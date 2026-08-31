@@ -4,6 +4,10 @@ plugins {
     id "dev.flutter.flutter-gradle-plugin"
 }
 
+def githubRunNumber = System.getenv("GITHUB_RUN_NUMBER")
+def computedVersionCode = githubRunNumber ? githubRunNumber.toInteger() : flutter.versionCode
+def computedVersionName = githubRunNumber ? "1.0.${githubRunNumber}" : flutter.versionName
+
 android {
     namespace = "com.example.smoke_finder"
     compileSdk = flutter.compileSdkVersion
@@ -22,8 +26,17 @@ android {
         applicationId = "com.example.smoke_finder"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        versionCode = flutter.versionCode
-        versionName = flutter.versionName
+        versionCode = computedVersionCode
+        versionName = computedVersionName
+    }
+
+    signingConfigs {
+        debug {
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+            storeFile file('debug.keystore')
+            storePassword 'android'
+        }
     }
 
     buildTypes {

@@ -17,12 +17,12 @@ enum AreaFilterType {
 }
 
 class MapScreen extends StatefulWidget {
-  final List<SmokingArea>? preloadedAreas;
+  final List<SmokingArea>? preloadedSmokingAreas;
   final Position? initialPosition;
 
   const MapScreen({
     super.key,
-    this.preloadedAreas,
+    this.preloadedSmokingAreas,
     this.initialPosition,
   });
 
@@ -34,14 +34,22 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
   final MapController _mapController = MapController();
   final SmokingAreaService _areaService = SmokingAreaService();
 
+  // 금연구역 표시 최소 줌 레벨 (5만개 최적화)
+  static const double kMinNonSmokingZoom = 15.0;
+
   StreamSubscription<Position>? _positionStream;
   Position? _currentPosition;
-  List<SmokingArea> _allAreas = [];
+
+  List<SmokingArea> _smokingAreas = [];
+  List<SmokingArea> _nonSmokingAreas = []; // 현재 화면(BBox) 내 동적 금연구역
+
   LocationCheckResult? _checkResult;
   bool _isLoading = true;
   double _currentRotation = 0.0;
+  double _currentZoom = 17.0;
 
   AreaFilterType _currentFilter = AreaFilterType.all;
+  Timer? _boundsDebounceTimer;
 
   AnimationController? _rotationAnimationController;
   Animation<double>? _rotationAnimation;
@@ -53,39 +61,109 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
   }
 
   Future<void> _initialize() async {
-    if (widget.preloadedAreas != null && widget.initialPosition != null) {
-      _allAreas = widget.preloadedAreas!;
-      _handleNewPosition(widget.initialPosition!);
-      _isLoading = false;
+    // 1. 흡연구역 목록 로드
+    if (widget.preloadedSmokingAreas != null && widget.preloadedSmokingAreas!.isNotEmpty) {
+      _smokingAreas = widget.preloadedSmokingAreas!;
     } else {
-      final areas = await _areaService.loadAllAreas();
-      setState(() {
-        _allAreas = areas;
-      });
-
-      await LocationService.requestLocationPermission();
-      Position initialPos = await LocationService.getCurrentPosition();
-      _handleNewPosition(initialPos);
-
-      setState(() {
-        _isLoading = false;
-      });
+      _smokingAreas = await _areaService.loadSmokingAreas();
     }
 
+    // 2. 위치 권한 및 초기 위치 설정
+    await LocationService.requestLocationPermission();
+    Position initialPos = widget.initialPosition ?? await LocationService.getCurrentPosition();
+    _currentPosition = initialPos;
+
+    // 3. 내 위치 주변 금연구역 1차 로드 (초기 지오펜싱용)
+    final initialNearbyNonSmoking = await _areaService.loadNearbyNonSmokingAreas(
+      userLat: initialPos.latitude,
+      userLng: initialPos.longitude,
+    );
+    _nonSmokingAreas = initialNearbyNonSmoking;
+
+    _evaluateUserLocation(initialPos);
+
+    setState(() {
+      _isLoading = false;
+    });
+
+    // 4. 실시간 위치 추적 리스너
     _positionStream = LocationService.getPositionStream().listen((pos) {
-      _handleNewPosition(pos);
+      _currentPosition = pos;
+      _evaluateUserLocation(pos);
+    });
+
+    // 5. 첫 화면 Bounding Box 내 금연구역 로드
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _fetchVisibleNonSmokingAreas();
     });
   }
 
-  void _handleNewPosition(Position position) {
+  // 사용자 위치 평가 (지오펜싱)
+  void _evaluateUserLocation(Position position) {
+    final combined = <SmokingArea>[..._smokingAreas, ..._nonSmokingAreas];
     setState(() {
-      _currentPosition = position;
       _checkResult = LocationService.evaluateLocation(
         userLat: position.latitude,
         userLng: position.longitude,
-        areas: _allAreas,
+        areas: combined,
       );
     });
+  }
+
+  // 현재 화면 영역(Bounding Box) 내 금연구역 동적 조회 (Debounce 300ms)
+  void _onMapPositionChanged(MapCamera camera, bool hasGesture) {
+    if (hasGesture && _rotationAnimationController?.isAnimating == true) {
+      _rotationAnimationController?.stop();
+    }
+
+    if ((_currentRotation - camera.rotation).abs() > 0.01) {
+      setState(() {
+        _currentRotation = camera.rotation;
+      });
+    }
+
+    _currentZoom = camera.zoom;
+
+    // 줌 레벨이 15 이상일 때만 Bounding Box 쿼리 수행
+    if (_currentZoom >= kMinNonSmokingZoom) {
+      _boundsDebounceTimer?.cancel();
+      _boundsDebounceTimer = Timer(const Duration(milliseconds: 300), () {
+        _fetchVisibleNonSmokingAreas();
+      });
+    } else {
+      if (_nonSmokingAreas.isNotEmpty) {
+        setState(() {
+          _nonSmokingAreas = [];
+        });
+      }
+    }
+  }
+
+  Future<void> _fetchVisibleNonSmokingAreas() async {
+    if (_currentZoom < kMinNonSmokingZoom) return;
+
+    final bounds = _mapController.camera.visibleBounds;
+    final minLat = bounds.south;
+    final maxLat = bounds.north;
+    final minLng = bounds.west;
+    final maxLng = bounds.east;
+
+    final visibleNonSmoking = await _areaService.loadNonSmokingAreasInBounds(
+      minLat: minLat,
+      maxLat: maxLat,
+      minLng: minLng,
+      maxLng: maxLng,
+      limit: 150,
+    );
+
+    if (mounted) {
+      setState(() {
+        _nonSmokingAreas = visibleNonSmoking;
+        if (_currentPosition != null) {
+          _evaluateUserLocation(_currentPosition!);
+        }
+      });
+    }
   }
 
   void _moveToUserLocation() {
@@ -94,13 +172,13 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
         LatLng(_currentPosition!.latitude, _currentPosition!.longitude),
         17.0,
       );
+      _fetchVisibleNonSmokingAreas();
     }
   }
 
   void _resetRotation() {
     final startRotation = _mapController.camera.rotation;
 
-    // 회전 각도를 [-180, 180] 범위로 정규화하여 최단 경로로 북쪽(0도) 정렬
     double normalizedStart = startRotation % 360.0;
     if (normalizedStart > 180.0) {
       normalizedStart -= 360.0;
@@ -163,24 +241,26 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     );
   }
 
-  // 필터가 적용된 구역 목록
-  List<SmokingArea> get _filteredAreas {
+  // 필터 및 줌 레벨에 따라 화면에 렌더링할 구역 목록
+  List<SmokingArea> get _displayedAreas {
+    final showNonSmoking = _currentZoom >= kMinNonSmokingZoom;
+
     switch (_currentFilter) {
       case AreaFilterType.smokingOnly:
-        return _allAreas.where((a) => a.isSmoking).toList();
+        return _smokingAreas;
       case AreaFilterType.nonSmokingOnly:
-        return _allAreas.where((a) => a.isNonSmoking).toList();
+        return showNonSmoking ? _nonSmokingAreas : [];
       case AreaFilterType.all:
       default:
-        return _allAreas;
+        return showNonSmoking
+            ? [..._smokingAreas, ..._nonSmokingAreas]
+            : _smokingAreas;
     }
   }
 
-  int get _smokingCount => _allAreas.where((a) => a.isSmoking).length;
-  int get _nonSmokingCount => _allAreas.where((a) => a.isNonSmoking).length;
-
   @override
   void dispose() {
+    _boundsDebounceTimer?.cancel();
     _positionStream?.cancel();
     _rotationAnimationController?.dispose();
     _mapController.dispose();
@@ -194,6 +274,8 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
         ? LatLng(userPos.latitude, userPos.longitude)
         : const LatLng(35.90682384, 128.62055516);
 
+    final isZoomTooFarForNonSmoking = _currentZoom < kMinNonSmokingZoom;
+
     return Scaffold(
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -202,7 +284,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                 // 1. 메인 지도 (전체화면)
                 _buildMapView(userLatLng),
 
-                // 2. 상단 상태 배너
+                // 2. 상단 상태 배너 & 필터 칩
                 Positioned(
                   top: 0,
                   left: 0,
@@ -232,7 +314,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                           ),
                           const SizedBox(height: 8),
 
-                          // 3. 구역 필터 칩 (전체 / 흡연구역 / 금연구역)
+                          // 3. 구역 필터 칩
                           _buildFilterChips(),
                         ],
                       ),
@@ -240,7 +322,43 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                   ),
                 ),
 
-                // 4. 방위 정렬(나침반) 버튼
+                // 4. 지도를 축소했을 때 금연구역 안내 툴팁 뱃지
+                if (isZoomTooFarForNonSmoking && _currentFilter != AreaFilterType.smokingOnly)
+                  Positioned(
+                    bottom: 24,
+                    left: 20,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0F172A).withOpacity(0.85),
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Colors.black26,
+                            blurRadius: 8,
+                            offset: Offset(0, 3),
+                          ),
+                        ],
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.zoom_in, color: Colors.orangeAccent, size: 18),
+                          SizedBox(width: 6),
+                          Text(
+                            '지도를 확대하면 금연구역이 표시됩니다',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                // 5. 방위 정렬(나침반) 버튼
                 Positioned(
                   top: 175,
                   right: 16,
@@ -289,25 +407,30 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
   }
 
   Widget _buildFilterChips() {
+    final showNonSmoking = _currentZoom >= kMinNonSmokingZoom;
+    final nonSmokingLabel = showNonSmoking
+        ? '🚫 금연구역 (${_nonSmokingAreas.length})'
+        : '🚫 금연구역 (확대필요)';
+
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           _buildChip(
-            label: '전체 (${_allAreas.length})',
+            label: '전체',
             filterType: AreaFilterType.all,
             activeColor: const Color(0xFF1E293B),
           ),
           const SizedBox(width: 8),
           _buildChip(
-            label: '🚬 흡연구역 ($_smokingCount)',
+            label: '🚬 흡연구역 (${_smokingAreas.length})',
             filterType: AreaFilterType.smokingOnly,
             activeColor: const Color(0xFFD97706),
           ),
           const SizedBox(width: 8),
           _buildChip(
-            label: '🚫 금연구역 ($_nonSmokingCount)',
+            label: nonSmokingLabel,
             filterType: AreaFilterType.nonSmokingOnly,
             activeColor: const Color(0xFFDC2626),
           ),
@@ -363,7 +486,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
   }
 
   Widget _buildMapView(LatLng userLatLng) {
-    final displayAreas = _filteredAreas;
+    final displayAreas = _displayedAreas;
 
     return FlutterMap(
       mapController: _mapController,
@@ -377,16 +500,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
           enableMultiFingerGestureRace: true,
           rotationThreshold: 5.0,
         ),
-        onPositionChanged: (camera, hasGesture) {
-          if (hasGesture && _rotationAnimationController?.isAnimating == true) {
-            _rotationAnimationController?.stop();
-          }
-          if ((_currentRotation - camera.rotation).abs() > 0.01) {
-            setState(() {
-              _currentRotation = camera.rotation;
-            });
-          }
-        },
+        onPositionChanged: _onMapPositionChanged,
       ),
       children: [
         TileLayer(
@@ -395,14 +509,13 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
           tileProvider: NetworkTileProvider(),
         ),
 
-        // 원형 반경 레이어 (흡연구역: 주황/녹색, 금연구역: 붉은색)
+        // 원형 반경 레이어
         CircleLayer(
           circles: displayAreas.map((area) {
             final isInsideSmoking = _checkResult?.currentSmokingArea?.id == area.id;
             final isInsideNonSmoking = _checkResult?.currentNonSmokingArea?.id == area.id;
 
             if (area.isNonSmoking) {
-              // 금연구역 반경 (붉은색 테두리 및 영역)
               return CircleMarker(
                 point: LatLng(area.latitude, area.longitude),
                 radius: area.radius,
@@ -414,7 +527,6 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                 borderStrokeWidth: isInsideNonSmoking ? 3.0 : 1.5,
               );
             } else {
-              // 흡연구역 반경 (주황색/초록색)
               return CircleMarker(
                 point: LatLng(area.latitude, area.longitude),
                 radius: area.radius,
@@ -429,7 +541,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
           }).toList(),
         ),
 
-        // 마커 레이어 (흡연구역 vs 금연구역 차별화)
+        // 마커 레이어
         MarkerLayer(
           rotate: true,
           markers: [
@@ -581,7 +693,7 @@ class _CompassNeedlePainter extends CustomPainter {
     final centerY = size.height / 2;
     final halfWidth = size.width * 0.22;
 
-    // 북쪽(N) 바늘 (밝은 빨간색)
+    // 북쪽(N) 바늘
     final northPath = Path()
       ..moveTo(centerX, 2)
       ..lineTo(centerX + halfWidth, centerY)
@@ -594,7 +706,6 @@ class _CompassNeedlePainter extends CustomPainter {
       ..style = PaintingStyle.fill;
     canvas.drawPath(northPath, northPaint);
 
-    // 북쪽 바늘 입체 음영 (더 짙은 빨간색)
     final northRightPath = Path()
       ..moveTo(centerX, 2)
       ..lineTo(centerX + halfWidth, centerY)
@@ -605,7 +716,7 @@ class _CompassNeedlePainter extends CustomPainter {
       ..style = PaintingStyle.fill;
     canvas.drawPath(northRightPath, northDarkPaint);
 
-    // 남쪽(S) 바늘 (밝은 회색)
+    // 남쪽(S) 바늘
     final southPath = Path()
       ..moveTo(centerX, size.height - 2)
       ..lineTo(centerX + halfWidth, centerY)
@@ -618,7 +729,6 @@ class _CompassNeedlePainter extends CustomPainter {
       ..style = PaintingStyle.fill;
     canvas.drawPath(southPath, southPaint);
 
-    // 남쪽 바늘 입체 음영 (더 짙은 회색)
     final southRightPath = Path()
       ..moveTo(centerX, size.height - 2)
       ..lineTo(centerX + halfWidth, centerY)
