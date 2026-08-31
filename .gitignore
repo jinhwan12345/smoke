@@ -30,4 +30,5 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
+scripts/import_state.json
 
