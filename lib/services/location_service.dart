@@ -4,16 +4,29 @@ import '../models/smoking_area.dart';
 
 class LocationCheckResult {
   final bool isInsideSmokingArea;
-  final SmokingArea? currentArea; // 내부일 때 해당 흡연구역
-  final SmokingArea? nearestArea; // 가장 가까운 흡연구역
-  final double distanceToNearest; // 가장 가까운 흡연구역까지 거리 (미터)
+  final bool isInsideNonSmokingArea;
+  final SmokingArea? currentSmokingArea;
+  final SmokingArea? currentNonSmokingArea;
+  final SmokingArea? nearestSmokingArea;
+  final SmokingArea? nearestNonSmokingArea;
+  final double distanceToNearestSmoking;
+  final double distanceToNearestNonSmoking;
 
   LocationCheckResult({
     required this.isInsideSmokingArea,
-    this.currentArea,
-    this.nearestArea,
-    required this.distanceToNearest,
+    this.isInsideNonSmokingArea = false,
+    this.currentSmokingArea,
+    this.currentNonSmokingArea,
+    this.nearestSmokingArea,
+    this.nearestNonSmokingArea,
+    required this.distanceToNearestSmoking,
+    this.distanceToNearestNonSmoking = double.infinity,
   });
+
+  // 이전 코드 호환성용 getter
+  SmokingArea? get currentArea => currentSmokingArea ?? currentNonSmokingArea;
+  SmokingArea? get nearestArea => nearestSmokingArea ?? nearestNonSmokingArea;
+  double get distanceToNearest => distanceToNearestSmoking;
 }
 
 class LocationService {
@@ -69,7 +82,7 @@ class LocationService {
     );
   }
 
-  // 지오펜싱 계산: 현재 위치가 흡연구역인지 확인
+  // 지오펜싱 계산: 현재 위치가 흡연구역 또는 금연구역인지 판정
   static LocationCheckResult evaluateLocation({
     required double userLat,
     required double userLng,
@@ -78,13 +91,20 @@ class LocationService {
     if (areas.isEmpty) {
       return LocationCheckResult(
         isInsideSmokingArea: false,
-        distanceToNearest: double.infinity,
+        isInsideNonSmokingArea: false,
+        distanceToNearestSmoking: double.infinity,
+        distanceToNearestNonSmoking: double.infinity,
       );
     }
 
-    SmokingArea? insideArea;
-    SmokingArea? nearestArea;
-    double minDistance = double.infinity;
+    SmokingArea? insideSmokingArea;
+    SmokingArea? insideNonSmokingArea;
+
+    SmokingArea? nearestSmoking;
+    SmokingArea? nearestNonSmoking;
+
+    double minDistanceSmoking = double.infinity;
+    double minDistanceNonSmoking = double.infinity;
 
     for (var area in areas) {
       // WGS84 구면 삼각법에 의한 거리 계산(미터)
@@ -95,22 +115,36 @@ class LocationService {
         area.longitude,
       );
 
-      if (distance < minDistance) {
-        minDistance = distance;
-        nearestArea = area;
-      }
-
-      // 지정된 반경 이내에 있으면 흡연구역 내부로 판정
-      if (distance <= area.radius) {
-        insideArea = area;
+      if (area.isNonSmoking) {
+        // 금연구역 처리
+        if (distance < minDistanceNonSmoking) {
+          minDistanceNonSmoking = distance;
+          nearestNonSmoking = area;
+        }
+        if (distance <= area.radius) {
+          insideNonSmokingArea = area;
+        }
+      } else {
+        // 흡연구역 처리
+        if (distance < minDistanceSmoking) {
+          minDistanceSmoking = distance;
+          nearestSmoking = area;
+        }
+        if (distance <= area.radius) {
+          insideSmokingArea = area;
+        }
       }
     }
 
     return LocationCheckResult(
-      isInsideSmokingArea: insideArea != null,
-      currentArea: insideArea,
-      nearestArea: nearestArea,
-      distanceToNearest: minDistance,
+      isInsideSmokingArea: insideSmokingArea != null,
+      isInsideNonSmokingArea: insideNonSmokingArea != null,
+      currentSmokingArea: insideSmokingArea,
+      currentNonSmokingArea: insideNonSmokingArea,
+      nearestSmokingArea: nearestSmoking,
+      nearestNonSmokingArea: nearestNonSmoking,
+      distanceToNearestSmoking: minDistanceSmoking,
+      distanceToNearestNonSmoking: minDistanceNonSmoking,
     );
   }
 }

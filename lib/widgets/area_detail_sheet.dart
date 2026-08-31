@@ -25,8 +25,13 @@ class AreaDetailSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isNonSmoking = area.isNonSmoking;
     final roadAddr = area.hasRoadAddress ? area.roadAddress : '도로명주소 정보 없음';
     final lotAddr = area.hasLotAddress ? area.lotAddress : '지번주소 정보 없음';
+
+    final themeColor = isNonSmoking ? const Color(0xFFDC2626) : const Color(0xFFD97706);
+    final iconAsset = isNonSmoking ? 'assets/images/no_smoke.png' : 'assets/images/app_logo.png';
+    final fallbackIcon = isNonSmoking ? Icons.smoke_free : Icons.smoking_rooms;
 
     return Container(
       decoration: const BoxDecoration(
@@ -51,19 +56,19 @@ class AreaDetailSheet extends StatelessWidget {
           ),
           const SizedBox(height: 16),
 
-          // 제목 및 면적 정보
+          // 제목 및 구역 타입 뱃지
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Container(
-                width: 32,
-                height: 32,
+                width: 34,
+                height: 34,
                 margin: const EdgeInsets.only(right: 10),
                 padding: const EdgeInsets.all(3),
                 decoration: BoxDecoration(
                   color: Colors.white,
                   shape: BoxShape.circle,
-                  border: Border.all(color: const Color(0xFFD97706), width: 1.5),
+                  border: Border.all(color: themeColor, width: 1.5),
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withOpacity(0.08),
@@ -74,12 +79,12 @@ class AreaDetailSheet extends StatelessWidget {
                 ),
                 child: ClipOval(
                   child: Image.asset(
-                    'assets/images/app_logo.png',
+                    iconAsset,
                     fit: BoxFit.contain,
-                    errorBuilder: (context, error, stackTrace) => const Icon(
-                      Icons.smoking_rooms,
-                      color: Color(0xFFD97706),
-                      size: 18,
+                    errorBuilder: (context, error, stackTrace) => Icon(
+                      fallbackIcon,
+                      color: themeColor,
+                      size: 20,
                     ),
                   ),
                 ),
@@ -94,26 +99,57 @@ class AreaDetailSheet extends StatelessWidget {
                   ),
                 ),
               ),
-              if (area.areaAr > 0)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE8F5E9),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: const Color(0xFF81C784)),
-                  ),
-                  child: Text(
-                    '면적 ${area.areaAr.toInt()}㎡',
-                    style: const TextStyle(
-                      color: Color(0xFF2E7D32),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isNonSmoking ? const Color(0xFFFEE2E2) : const Color(0xFFFEF3C7),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: isNonSmoking ? const Color(0xFFFCA5A5) : const Color(0xFFFCD34D),
                   ),
                 ),
+                child: Text(
+                  isNonSmoking ? '🚫 금연구역' : '🚬 흡연구역',
+                  style: TextStyle(
+                    color: isNonSmoking ? const Color(0xFFB91C1C) : const Color(0xFFB45309),
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
+
+          // 금연구역 경고 박스 (금연구역일 경우에만 표시)
+          if (isNonSmoking)
+            Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF1F2),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFFFCDD2)),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.warning_amber_rounded, color: Color(0xFFE11D48), size: 20),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      '이 구역은 지정 금연구역입니다. 흡연 시 과태료(최대 10만원)가 부과될 수 있습니다.',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        color: Color(0xFF9F1239),
+                        fontWeight: FontWeight.w600,
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
 
           // 1. 도로명 주소 카드
           Container(
@@ -215,7 +251,7 @@ class AreaDetailSheet extends StatelessWidget {
           ),
           const SizedBox(height: 14),
 
-          // 거리 & 유효 반경 & 기준일자
+          // 거리 & 면적 & 유효 반경 & 기준일자
           Row(
             children: [
               Icon(Icons.straighten, size: 17, color: Colors.grey[600]),
@@ -234,6 +270,13 @@ class AreaDetailSheet extends StatelessWidget {
                 '• 유효 반경 ${area.radius.toInt()}m',
                 style: TextStyle(fontSize: 13, color: Colors.grey[600]),
               ),
+              if (area.areaAr > 0) ...[
+                const SizedBox(width: 6),
+                Text(
+                  '(${area.areaAr.toInt()}㎡)',
+                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                ),
+              ],
               const Spacer(),
               if (area.refDate.isNotEmpty)
                 Text(

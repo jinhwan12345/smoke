@@ -17,13 +17,43 @@ class StatusBanner extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    final isInside = checkResult!.isInsideSmokingArea;
-    final currentArea = checkResult!.currentArea;
-    final nearestArea = checkResult!.nearestArea;
-    final distance = checkResult!.distanceToNearest;
+    final isInsideSmoking = checkResult!.isInsideSmokingArea;
+    final isInsideNonSmoking = checkResult!.isInsideNonSmokingArea;
+    final currentSmoking = checkResult!.currentSmokingArea;
+    final currentNonSmoking = checkResult!.currentNonSmokingArea;
+    final nearestSmoking = checkResult!.nearestSmokingArea;
+    final distSmoking = checkResult!.distanceToNearestSmoking;
 
-    final primaryColor = isInside ? const Color(0xFF2E7D32) : const Color(0xFFC62828);
-    final statusTitle = isInside ? '현재 흡연구역 내부입니다 🚬' : '현재 금연구역(비흡연구역)입니다 🚫';
+    // 배너 배경색, 아이콘, 텍스트 상태 분기
+    final Color primaryColor;
+    final String statusTitle;
+    final String statusSubtitle;
+    final String iconAsset;
+    final IconData fallbackIcon;
+
+    if (isInsideSmoking) {
+      primaryColor = const Color(0xFF2E7D32); // 초록색 (안전 흡연 구역)
+      statusTitle = '현재 흡연구역 내부입니다 🚬';
+      statusSubtitle = currentSmoking?.name ?? '지정 흡연구역';
+      iconAsset = 'assets/images/app_logo.png';
+      fallbackIcon = Icons.smoking_rooms;
+    } else if (isInsideNonSmoking) {
+      primaryColor = const Color(0xFFC62828); // 붉은색 (경고 금연 구역)
+      statusTitle = '현재 지정 금연구역 내부입니다 🚫';
+      statusSubtitle = '${currentNonSmoking?.name ?? "지정 금연구역"} (흡연 시 과태료 부과)';
+      iconAsset = 'assets/images/no_smoke.png';
+      fallbackIcon = Icons.smoke_free;
+    } else {
+      primaryColor = const Color(0xFF334155); // 슬레이트 색상 (일반 구역)
+      statusTitle = '현재 일반 구역(비흡연구역)입니다 🚶';
+      if (nearestSmoking != null && distSmoking != double.infinity) {
+        statusSubtitle = '가장 가까운 흡연구역: ${distSmoking.toInt()}m (${nearestSmoking.name})';
+      } else {
+        statusSubtitle = '주변에 등록된 흡연구역이 없습니다.';
+      }
+      iconAsset = 'assets/images/no_smoke.png';
+      fallbackIcon = Icons.info_outline;
+    }
 
     return Container(
       decoration: BoxDecoration(
@@ -63,12 +93,10 @@ class StatusBanner extends StatelessWidget {
                   ),
                   child: ClipOval(
                     child: Image.asset(
-                      isInside
-                          ? 'assets/images/app_logo.png'
-                          : 'assets/images/no_smoke.png',
+                      iconAsset,
                       fit: BoxFit.contain,
                       errorBuilder: (context, error, stackTrace) => Icon(
-                        isInside ? Icons.smoking_rooms : Icons.smoke_free,
+                        fallbackIcon,
                         color: primaryColor,
                         size: 26,
                       ),
@@ -90,23 +118,11 @@ class StatusBanner extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 4),
-                      if (isInside && currentArea != null)
-                        Text(
-                          currentArea.name,
-                          style: const TextStyle(color: Colors.white70, fontSize: 13),
-                          overflow: TextOverflow.ellipsis,
-                        )
-                      else if (!isInside && nearestArea != null)
-                        Text(
-                          '가장 가까운 흡연구역: ${distance.toInt()}m (${nearestArea.name})',
-                          style: const TextStyle(color: Colors.white70, fontSize: 13),
-                          overflow: TextOverflow.ellipsis,
-                        )
-                      else
-                        const Text(
-                          '주변에 등록된 흡연구역이 없습니다.',
-                          style: TextStyle(color: Colors.white70, fontSize: 13),
-                        ),
+                      Text(
+                        statusSubtitle,
+                        style: const TextStyle(color: Colors.white70, fontSize: 13),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ],
                   ),
                 ),
@@ -118,4 +134,3 @@ class StatusBanner extends StatelessWidget {
     );
   }
 }
-

@@ -2,7 +2,7 @@ import 'dart:math' as math;
 
 class SmokingArea {
   final String id;
-  final String name;          // area_nm (흡연구역명)
+  final String name;          // area_nm (구역명)
   final double areaAr;        // area_ar (면적 ㎡)
   final double latitude;      // latitude (위도)
   final double longitude;     // longitude (경도)
@@ -10,6 +10,7 @@ class SmokingArea {
   final String roadAddress;   // rdnmadr (도로명주소)
   final String refDate;       // ref_date (데이터 기준일자)
   final double radius;        // 면적 기반 유효 반경(m)
+  final bool isNonSmoking;    // 금연구역 여부 (true: 금연구역, false: 흡연구역)
 
   SmokingArea({
     required this.id,
@@ -21,7 +22,14 @@ class SmokingArea {
     required this.roadAddress,
     required this.refDate,
     required this.radius,
+    this.isNonSmoking = false,
   });
+
+  // 흡연구역 여부
+  bool get isSmoking => !isNonSmoking;
+
+  // 구역 타입 한글 라벨
+  String get typeLabel => isNonSmoking ? '금연구역' : '흡연구역';
 
   // 대표 주소 (도로명 우선, 없으면 지번)
   String get address {
@@ -33,8 +41,12 @@ class SmokingArea {
   bool get hasRoadAddress => roadAddress.trim().isNotEmpty;
   bool get hasLotAddress => lotAddress.trim().isNotEmpty;
 
-  factory SmokingArea.fromJson(Map<String, dynamic> json) {
-    final name = json['area_nm']?.toString() ?? json['area_desc']?.toString() ?? json['name']?.toString() ?? '지정 흡연구역';
+  factory SmokingArea.fromJson(Map<String, dynamic> json, {bool isNonSmoking = false}) {
+    final defaultName = isNonSmoking ? '지정 금연구역' : '지정 흡연구역';
+    final name = json['area_nm']?.toString() ??
+        json['area_desc']?.toString() ??
+        json['name']?.toString() ??
+        defaultName;
     final lotAddr = json['lnmadr']?.toString() ?? '';
     final roadAddr = json['rdnmadr']?.toString() ?? json['address']?.toString() ?? '';
     final refDate = json['ref_date']?.toString() ?? '';
@@ -53,6 +65,10 @@ class SmokingArea {
       rad = (json['radius'] as num).toDouble();
     }
 
+    final bool nonSmokingFlag = isNonSmoking ||
+        (json['is_non_smoking'] == true) ||
+        (json['type'] == 'non_smoking');
+
     return SmokingArea(
       id: json['id']?.toString() ?? '',
       name: name,
@@ -63,6 +79,7 @@ class SmokingArea {
       roadAddress: roadAddr,
       refDate: refDate,
       radius: rad,
+      isNonSmoking: nonSmokingFlag,
     );
   }
 
@@ -76,6 +93,7 @@ class SmokingArea {
       'lnmadr': lotAddress,
       'rdnmadr': roadAddress,
       'ref_date': refDate,
+      'is_non_smoking': isNonSmoking,
     };
   }
 }

@@ -15,7 +15,7 @@ class SplashScreen extends StatefulWidget {
 class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
-  String _statusText = '흡연구역 정보를 불러오는 중...';
+  String _statusText = '흡연/금연구역 정보를 불러오는 중...';
 
   @override
   void initState() {
@@ -36,9 +36,9 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   Future<void> _initializeApp() async {
     final startTime = DateTime.now();
 
-    // 1. 흡연구역 데이터 로딩
+    // 1. 흡연구역 및 금연구역 데이터 동시 로딩
     final areaService = SmokingAreaService();
-    final areas = await areaService.loadSmokingAreas();
+    final areas = await areaService.loadAllAreas();
 
     setState(() {
       _statusText = '현재 위치를 확인하는 중...';
@@ -133,7 +133,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                     ),
                     const SizedBox(height: 6),
                     const Text(
-                      '스마트 흡연구역 안내 & 길찾기',
+                      '스마트 흡연·금연구역 안내 & 길찾기',
                       style: TextStyle(
                         fontSize: 14,
                         color: Colors.white70,
