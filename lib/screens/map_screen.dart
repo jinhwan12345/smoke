@@ -409,7 +409,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
   Widget _buildFilterChips() {
     final showNonSmoking = _currentZoom >= kMinNonSmokingZoom;
     final nonSmokingLabel = showNonSmoking
-        ? '🚫 금연구역 (${_nonSmokingAreas.length})'
+        ? '🚫 금연구역'
         : '🚫 금연구역 (확대필요)';
 
     return SingleChildScrollView(
@@ -424,7 +424,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
           ),
           const SizedBox(width: 8),
           _buildChip(
-            label: '🚬 흡연구역 (${_smokingAreas.length})',
+            label: '🚬 흡연구역',
             filterType: AreaFilterType.smokingOnly,
             activeColor: const Color(0xFFD97706),
           ),

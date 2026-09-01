@@ -237,7 +237,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                   ),
                 ),
 
-                // 하단: 로딩 인디케이터 및 상태
+                // 하단: 로딩 인디케이터 및 상태 & 공공데이터 저작권 표시
                 Column(
                   children: [
                     const SizedBox(
@@ -256,7 +256,44 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                         fontSize: 13,
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 16),
+                    // 공공데이터 저작권(공공누리 제1유형) 표시
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.white10),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(2),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(3),
+                            ),
+                            child: Image.asset(
+                              'assets/images/kogl_type1.png',
+                              height: 14,
+                              fit: BoxFit.contain,
+                              errorBuilder: (context, error, stackTrace) => const SizedBox(),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Text(
+                            '출처: 공공데이터포털 전국금연구역표준데이터 (공공누리 제1유형)',
+                            style: TextStyle(
+                              color: Colors.white54,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w400,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 6),
                   ],
                 ),
               ],

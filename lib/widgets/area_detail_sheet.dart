@@ -286,7 +286,42 @@ class AreaDetailSheet extends StatelessWidget {
             ],
           ),
 
-          const SizedBox(height: 20),
+          // 공공데이터 저작권(공공누리 제1유형) 라이선스 표시
+          if (isNonSmoking) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Row(
+                children: [
+                  Image.asset(
+                    'assets/images/kogl_type1.png',
+                    height: 22,
+                    fit: BoxFit.contain,
+                    errorBuilder: (context, error, stackTrace) => const SizedBox(),
+                  ),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      '출처: 공공데이터포털 전국금연구역표준데이터 (공공누리 제1유형: 출처표시)',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF64748B),
+                        height: 1.3,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
             height: 48,
