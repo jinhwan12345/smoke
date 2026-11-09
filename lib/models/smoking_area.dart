@@ -25,19 +25,6 @@ class SmokingArea {
     this.isNonSmoking = false,
   });
 
-  // 흡연구역 여부
-  bool get isSmoking => !isNonSmoking;
-
-  // 구역 타입 한글 라벨
-  String get typeLabel => isNonSmoking ? '금연구역' : '흡연구역';
-
-  // 대표 주소 (도로명 우선, 없으면 지번)
-  String get address {
-    if (roadAddress.isNotEmpty) return roadAddress;
-    if (lotAddress.isNotEmpty) return lotAddress;
-    return '주소 정보 없음';
-  }
-
   bool get hasRoadAddress => roadAddress.trim().isNotEmpty;
   bool get hasLotAddress => lotAddress.trim().isNotEmpty;
 
@@ -81,19 +68,5 @@ class SmokingArea {
       radius: rad,
       isNonSmoking: nonSmokingFlag,
     );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'area_nm': name,
-      'area_ar': areaAr,
-      'latitude': latitude,
-      'longitude': longitude,
-      'lnmadr': lotAddress,
-      'rdnmadr': roadAddress,
-      'ref_date': refDate,
-      'is_non_smoking': isNonSmoking,
-    };
   }
 }

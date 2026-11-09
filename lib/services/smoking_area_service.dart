@@ -1,46 +1,34 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart' show rootBundle;
 import 'package:http/http.dart' as http;
+import '../models/district_region.dart';
 import '../models/smoking_area.dart';
 
 class SmokingAreaService {
-  List<SmokingArea> _cachedSmokingAreas = [];
-  List<SmokingArea> _cachedLocalNonSmokingAreas = [];
-
-  // Supabase 실시간 클라우드 DB 설정
   static const String supabaseUrl = 'https://cqtojdswnwgshqhnwzmg.supabase.co';
   static const String supabaseAnonKey = 'sb_publishable_4nbwJnVgf34sKrCKpNsSTQ_zy8QudVU';
 
-  // 1. 흡연구역(smoking_areas) 전체 로드 (흡연구역은 데이터 수가 적어 전체 로드 유지)
-  Future<List<SmokingArea>> loadSmokingAreas() async {
-    try {
-      final response = await http.get(
-        Uri.parse('$supabaseUrl/rest/v1/smoking_areas?select=*'),
-        headers: {
-          'apikey': supabaseAnonKey,
-          'Authorization': 'Bearer $supabaseAnonKey',
-        },
-      ).timeout(const Duration(seconds: 4));
+  static const Map<String, String> _headers = {
+    'apikey': supabaseAnonKey,
+    'Authorization': 'Bearer $supabaseAnonKey',
+  };
 
-      if (response.statusCode == 200) {
-        final List<dynamic> jsonList = json.decode(response.body);
-        if (jsonList.isNotEmpty) {
-          _cachedSmokingAreas = jsonList
-              .map((item) => SmokingArea.fromJson(item, isNonSmoking: false))
-              .toList();
-          return _cachedSmokingAreas;
-        }
-      }
-    } catch (e) {
-      debugPrint('Supabase 흡연구역 통신 오류 또는 타임아웃, 로컬 데이터 사용: $e');
-    }
+  static const Map<String, String> _countHeaders = {
+    'apikey': supabaseAnonKey,
+    'Authorization': 'Bearer $supabaseAnonKey',
+    'Prefer': 'count=exact',
+  };
 
-    return await loadLocalSmokingAreas();
-  }
+  // 지역(시·군·구)별 흡연/금연구역 개수 메모리 캐시 (중복 요청 방지)
+  final Map<String, RegionCounts> _regionCountsCache = {};
+  final Set<String> _loadingRegionCodes = {};
 
-  // 2. 현재 지도 화면(Bounding Box)에 보이는 금연구역만 동적 조회 (대용량 5만건 최적화)
-  Future<List<SmokingArea>> loadNonSmokingAreasInBounds({
+  Map<String, RegionCounts> get cachedRegionCounts => _regionCountsCache;
+
+  // 현재 지도 화면(Bounding Box) 내 구역 동적 조회 (흡연구역 / 금연구역 공통)
+  Future<List<SmokingArea>> _loadAreasInBounds({
+    required String table,
+    required bool isNonSmoking,
     required double minLat,
     required double maxLat,
     required double minLng,
@@ -49,86 +37,166 @@ class SmokingAreaService {
   }) async {
     try {
       final uri = Uri.parse(
-        '$supabaseUrl/rest/v1/non_smoking_areas?'
+        '$supabaseUrl/rest/v1/$table?'
         'latitude=gte.$minLat&latitude=lte.$maxLat&'
         'longitude=gte.$minLng&longitude=lte.$maxLng&'
         'limit=$limit',
       );
 
-      final response = await http.get(
-        uri,
-        headers: {
-          'apikey': supabaseAnonKey,
-          'Authorization': 'Bearer $supabaseAnonKey',
-        },
-      ).timeout(const Duration(seconds: 4));
+      final response = await http
+          .get(uri, headers: _headers)
+          .timeout(const Duration(seconds: 4));
 
       if (response.statusCode == 200) {
         final List<dynamic> jsonList = json.decode(response.body);
         return jsonList
-            .map((item) => SmokingArea.fromJson(item, isNonSmoking: true))
+            .map((item) => SmokingArea.fromJson(item, isNonSmoking: isNonSmoking))
             .toList();
       }
     } catch (e) {
-      debugPrint('Supabase 화면 영역 금연구역 조회 에러: $e');
+      debugPrint('Supabase $table 조회 에러: $e');
     }
-
-    // 통신 실패 시 로컬 fallback에서 영역 필터링
-    final localList = await loadLocalNonSmokingAreas();
-    return localList.where((area) {
-      return area.latitude >= minLat &&
-          area.latitude <= maxLat &&
-          area.longitude >= minLng &&
-          area.longitude <= maxLng;
-    }).toList();
+    return [];
   }
 
-  // 3. 내 위치 주변(반경 ~500m) 금연구역 조회 (지오펜싱 및 상태 배너 판정용)
-  Future<List<SmokingArea>> loadNearbyNonSmokingAreas({
+  // 1. 현재 화면 영역(Bounding Box) 내 흡연구역 동적 조회
+  Future<List<SmokingArea>> loadSmokingAreasInBounds({
+    required double minLat,
+    required double maxLat,
+    required double minLng,
+    required double maxLng,
+    int limit = 150,
+  }) {
+    return _loadAreasInBounds(
+      table: 'smoking_areas',
+      isNonSmoking: false,
+      minLat: minLat,
+      maxLat: maxLat,
+      minLng: minLng,
+      maxLng: maxLng,
+      limit: limit,
+    );
+  }
+
+  // 2. 현재 화면 영역(Bounding Box) 내 금연구역 동적 조회
+  Future<List<SmokingArea>> loadNonSmokingAreasInBounds({
+    required double minLat,
+    required double maxLat,
+    required double minLng,
+    required double maxLng,
+    int limit = 150,
+  }) {
+    return _loadAreasInBounds(
+      table: 'non_smoking_areas',
+      isNonSmoking: true,
+      minLat: minLat,
+      maxLat: maxLat,
+      minLng: minLng,
+      maxLng: maxLng,
+      limit: limit,
+    );
+  }
+
+  // 3. 내 위치 주변(반경 ~500m) 흡연/금연구역 동시 조회 (초기 지오펜싱 및 상태 배너 판정용)
+  Future<({List<SmokingArea> smoking, List<SmokingArea> nonSmoking})> loadNearbyAreas({
     required double userLat,
     required double userLng,
     double radiusDegrees = 0.005, // 약 500m
     int limit = 50,
   }) async {
-    return await loadNonSmokingAreasInBounds(
-      minLat: userLat - radiusDegrees,
-      maxLat: userLat + radiusDegrees,
-      minLng: userLng - (radiusDegrees * 1.2),
-      maxLng: userLng + (radiusDegrees * 1.2),
-      limit: limit,
-    );
+    final minLat = userLat - radiusDegrees;
+    final maxLat = userLat + radiusDegrees;
+    final minLng = userLng - (radiusDegrees * 1.2);
+    final maxLng = userLng + (radiusDegrees * 1.2);
+
+    final results = await Future.wait([
+      loadSmokingAreasInBounds(
+        minLat: minLat,
+        maxLat: maxLat,
+        minLng: minLng,
+        maxLng: maxLng,
+        limit: limit,
+      ),
+      loadNonSmokingAreasInBounds(
+        minLat: minLat,
+        maxLat: maxLat,
+        minLng: minLng,
+        maxLng: maxLng,
+        limit: limit,
+      ),
+    ]);
+
+    return (smoking: results[0], nonSmoking: results[1]);
   }
 
-  // 로컬 assets/data/smoking_areas.json 로드
-  Future<List<SmokingArea>> loadLocalSmokingAreas() async {
+  // 4. 특정 테이블의 영역 내 정확한 개수 조회 (HEAD + Prefer: count=exact)
+  Future<int> _countAreasInBounds({
+    required String table,
+    required double minLat,
+    required double maxLat,
+    required double minLng,
+    required double maxLng,
+  }) async {
     try {
-      final jsonString = await rootBundle.loadString('assets/data/smoking_areas.json');
-      final List<dynamic> jsonList = json.decode(jsonString);
-      _cachedSmokingAreas = jsonList
-          .map((item) => SmokingArea.fromJson(item, isNonSmoking: false))
-          .toList();
-      return _cachedSmokingAreas;
+      final uri = Uri.parse(
+        '$supabaseUrl/rest/v1/$table?select=id&'
+        'latitude=gte.$minLat&latitude=lte.$maxLat&'
+        'longitude=gte.$minLng&longitude=lte.$maxLng&'
+        'limit=1',
+      );
+
+      final response = await http
+          .head(uri, headers: _countHeaders)
+          .timeout(const Duration(seconds: 5));
+
+      final contentRange = response.headers['content-range'];
+      if (contentRange != null && contentRange.contains('/')) {
+        final totalStr = contentRange.split('/').last;
+        return int.tryParse(totalStr) ?? 0;
+      }
     } catch (e) {
-      debugPrint('로컬 흡연구역 데이터 로딩 에러: $e');
-      return [];
+      debugPrint('Supabase $table 개수 조회 에러: $e');
     }
+    return 0;
   }
 
-  // 로컬 assets/data/non_smoking_areas.json 로드
-  Future<List<SmokingArea>> loadLocalNonSmokingAreas() async {
-    if (_cachedLocalNonSmokingAreas.isNotEmpty) {
-      return _cachedLocalNonSmokingAreas;
+  // 5. 단일 시·군·구 지역의 흡연/금연구역 개수 조회 및 캐싱
+  Future<RegionCounts?> fetchRegionCounts(DistrictRegion region) async {
+    if (_regionCountsCache.containsKey(region.code)) {
+      return _regionCountsCache[region.code];
     }
+    if (_loadingRegionCodes.contains(region.code)) {
+      return null;
+    }
+
+    _loadingRegionCodes.add(region.code);
     try {
-      final jsonString = await rootBundle.loadString('assets/data/non_smoking_areas.json');
-      final List<dynamic> jsonList = json.decode(jsonString);
-      _cachedLocalNonSmokingAreas = jsonList
-          .map((item) => SmokingArea.fromJson(item, isNonSmoking: true))
-          .toList();
-      return _cachedLocalNonSmokingAreas;
-    } catch (e) {
-      debugPrint('로컬 금연구역 데이터 로딩 에러: $e');
-      return [];
+      final counts = await Future.wait([
+        _countAreasInBounds(
+          table: 'smoking_areas',
+          minLat: region.minLat,
+          maxLat: region.maxLat,
+          minLng: region.minLng,
+          maxLng: region.maxLng,
+        ),
+        _countAreasInBounds(
+          table: 'non_smoking_areas',
+          minLat: region.minLat,
+          maxLat: region.maxLat,
+          minLng: region.minLng,
+          maxLng: region.maxLng,
+        ),
+      ]);
+
+      final result = RegionCounts(
+        region: region,
+        smokingCount: counts[0],
+        nonSmokingCount: counts[1],
+      );
+      _regionCountsCache[region.code] = result;
+      return result;
+    } finally {
+      _loadingRegionCodes.remove(region.code);
     }
   }
 }

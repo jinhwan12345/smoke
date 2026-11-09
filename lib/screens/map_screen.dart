@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' hide Path;
 import 'package:geolocator/geolocator.dart';
+import '../models/district_region.dart';
 import '../models/smoking_area.dart';
 import '../services/location_service.dart';
 import '../services/smoking_area_service.dart';
@@ -17,12 +18,10 @@ enum AreaFilterType {
 }
 
 class MapScreen extends StatefulWidget {
-  final List<SmokingArea>? preloadedSmokingAreas;
   final Position? initialPosition;
 
   const MapScreen({
     super.key,
-    this.preloadedSmokingAreas,
     this.initialPosition,
   });
 
@@ -34,14 +33,15 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
   final MapController _mapController = MapController();
   final SmokingAreaService _areaService = SmokingAreaService();
 
-  // 금연구역 표시 최소 줌 레벨 (5만개 최적화)
-  static const double kMinNonSmokingZoom = 15.0;
+  // 개별 마커 표시 최소 줌 레벨 (15 미만일 때는 시·군·구 클러스터 배지 표시)
+  static const double kMinAreaZoom = 15.0;
 
   StreamSubscription<Position>? _positionStream;
   Position? _currentPosition;
 
-  List<SmokingArea> _smokingAreas = [];
-  List<SmokingArea> _nonSmokingAreas = []; // 현재 화면(BBox) 내 동적 금연구역
+  List<SmokingArea> _smokingAreas = [];      // 현재 화면(BBox) 내 동적 흡연구역
+  List<SmokingArea> _nonSmokingAreas = [];   // 현재 화면(BBox) 내 동적 금연구역
+  List<DistrictRegion> _visibleRegions = []; // 축소 시 현재 화면에 보이는 시·군·구 목록
 
   LocationCheckResult? _checkResult;
   bool _isLoading = true;
@@ -61,24 +61,18 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
   }
 
   Future<void> _initialize() async {
-    // 1. 흡연구역 목록 로드
-    if (widget.preloadedSmokingAreas != null && widget.preloadedSmokingAreas!.isNotEmpty) {
-      _smokingAreas = widget.preloadedSmokingAreas!;
-    } else {
-      _smokingAreas = await _areaService.loadSmokingAreas();
-    }
-
-    // 2. 위치 권한 및 초기 위치 설정
+    // 1. 위치 권한 및 초기 위치 설정
     await LocationService.requestLocationPermission();
     Position initialPos = widget.initialPosition ?? await LocationService.getCurrentPosition();
     _currentPosition = initialPos;
 
-    // 3. 내 위치 주변 금연구역 1차 로드 (초기 지오펜싱용)
-    final initialNearbyNonSmoking = await _areaService.loadNearbyNonSmokingAreas(
+    // 2. 내 위치 주변 흡연/금연구역 1차 로드 (초기 지오펜싱용)
+    final nearby = await _areaService.loadNearbyAreas(
       userLat: initialPos.latitude,
       userLng: initialPos.longitude,
     );
-    _nonSmokingAreas = initialNearbyNonSmoking;
+    _smokingAreas = nearby.smoking;
+    _nonSmokingAreas = nearby.nonSmoking;
 
     _evaluateUserLocation(initialPos);
 
@@ -86,15 +80,15 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
       _isLoading = false;
     });
 
-    // 4. 실시간 위치 추적 리스너
+    // 3. 실시간 위치 추적 리스너
     _positionStream = LocationService.getPositionStream().listen((pos) {
       _currentPosition = pos;
       _evaluateUserLocation(pos);
     });
 
-    // 5. 첫 화면 Bounding Box 내 금연구역 로드
+    // 4. 첫 화면 Bounding Box 내 흡연/금연구역 로드
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _fetchVisibleNonSmokingAreas();
+      _fetchVisibleAreas();
     });
   }
 
@@ -110,7 +104,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     });
   }
 
-  // 현재 화면 영역(Bounding Box) 내 금연구역 동적 조회 (Debounce 300ms)
+  // 지도 이동/줌 변경 시 처리 (Debounce 300ms)
   void _onMapPositionChanged(MapCamera camera, bool hasGesture) {
     if (hasGesture && _rotationAnimationController?.isAnimating == true) {
       _rotationAnimationController?.stop();
@@ -122,25 +116,80 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
       });
     }
 
+    final prevZoom = _currentZoom;
     _currentZoom = camera.zoom;
 
-    // 줌 레벨이 15 이상일 때만 Bounding Box 쿼리 수행
-    if (_currentZoom >= kMinNonSmokingZoom) {
+    if (_currentZoom >= kMinAreaZoom) {
+      // 줌 레벨 15 이상: 개별 흡연/금연구역 마커 표시
+      if (prevZoom < kMinAreaZoom || _visibleRegions.isNotEmpty) {
+        setState(() {
+          _visibleRegions = [];
+        });
+      }
       _boundsDebounceTimer?.cancel();
       _boundsDebounceTimer = Timer(const Duration(milliseconds: 300), () {
-        _fetchVisibleNonSmokingAreas();
+        _fetchVisibleAreas();
       });
     } else {
-      if (_nonSmokingAreas.isNotEmpty) {
+      // 줌 레벨 15 미만: 시·군·구 클러스터(묶음) 배지 표시
+      if (_smokingAreas.isNotEmpty || _nonSmokingAreas.isNotEmpty || prevZoom >= kMinAreaZoom) {
         setState(() {
+          _smokingAreas = [];
           _nonSmokingAreas = [];
         });
+      }
+      _updateVisibleDistrictsImmediate(camera);
+      _boundsDebounceTimer?.cancel();
+      _boundsDebounceTimer = Timer(const Duration(milliseconds: 250), () {
+        _fetchVisibleDistrictCounts();
+      });
+    }
+  }
+
+  // 현재 화면에 들어오는 시·군·구 목록 즉시 계산 (화면 중심 가까운 순 최대 25개)
+  void _updateVisibleDistrictsImmediate(MapCamera camera) {
+    final bounds = camera.visibleBounds;
+    final center = camera.center;
+
+    final inView = kKoreaDistricts.where((d) {
+      return d.latitude >= bounds.south &&
+          d.latitude <= bounds.north &&
+          d.longitude >= bounds.west &&
+          d.longitude <= bounds.east;
+    }).toList();
+
+    inView.sort((a, b) {
+      final distA = (a.latitude - center.latitude) * (a.latitude - center.latitude) +
+          (a.longitude - center.longitude) * (a.longitude - center.longitude);
+      final distB = (b.latitude - center.latitude) * (b.latitude - center.latitude) +
+          (b.longitude - center.longitude) * (b.longitude - center.longitude);
+      return distA.compareTo(distB);
+    });
+
+    final selected = inView.take(25).toList();
+    setState(() {
+      _visibleRegions = selected;
+    });
+  }
+
+  // 화면에 보이는 시·군·구의 흡연구역/금연구역 개수 비동기 조회
+  Future<void> _fetchVisibleDistrictCounts() async {
+    if (_currentZoom >= kMinAreaZoom) return;
+
+    final targets = List<DistrictRegion>.from(_visibleRegions);
+    for (final region in targets) {
+      if (!mounted || _currentZoom >= kMinAreaZoom) break;
+      if (_areaService.cachedRegionCounts.containsKey(region.code)) continue;
+
+      final res = await _areaService.fetchRegionCounts(region);
+      if (res != null && mounted && _currentZoom < kMinAreaZoom) {
+        setState(() {});
       }
     }
   }
 
-  Future<void> _fetchVisibleNonSmokingAreas() async {
-    if (_currentZoom < kMinNonSmokingZoom) return;
+  Future<void> _fetchVisibleAreas() async {
+    if (_currentZoom < kMinAreaZoom) return;
 
     final bounds = _mapController.camera.visibleBounds;
     final minLat = bounds.south;
@@ -148,17 +197,27 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     final minLng = bounds.west;
     final maxLng = bounds.east;
 
-    final visibleNonSmoking = await _areaService.loadNonSmokingAreasInBounds(
-      minLat: minLat,
-      maxLat: maxLat,
-      minLng: minLng,
-      maxLng: maxLng,
-      limit: 150,
-    );
+    final results = await Future.wait([
+      _areaService.loadSmokingAreasInBounds(
+        minLat: minLat,
+        maxLat: maxLat,
+        minLng: minLng,
+        maxLng: maxLng,
+        limit: 150,
+      ),
+      _areaService.loadNonSmokingAreasInBounds(
+        minLat: minLat,
+        maxLat: maxLat,
+        minLng: minLng,
+        maxLng: maxLng,
+        limit: 150,
+      ),
+    ]);
 
-    if (mounted) {
+    if (mounted && _currentZoom >= kMinAreaZoom) {
       setState(() {
-        _nonSmokingAreas = visibleNonSmoking;
+        _smokingAreas = results[0];
+        _nonSmokingAreas = results[1];
         if (_currentPosition != null) {
           _evaluateUserLocation(_currentPosition!);
         }
@@ -172,7 +231,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
         LatLng(_currentPosition!.latitude, _currentPosition!.longitude),
         17.0,
       );
-      _fetchVisibleNonSmokingAreas();
+      _fetchVisibleAreas();
     }
   }
 
@@ -243,18 +302,15 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
 
   // 필터 및 줌 레벨에 따라 화면에 렌더링할 구역 목록
   List<SmokingArea> get _displayedAreas {
-    final showNonSmoking = _currentZoom >= kMinNonSmokingZoom;
+    if (_currentZoom < kMinAreaZoom) return [];
 
     switch (_currentFilter) {
       case AreaFilterType.smokingOnly:
         return _smokingAreas;
       case AreaFilterType.nonSmokingOnly:
-        return showNonSmoking ? _nonSmokingAreas : [];
+        return _nonSmokingAreas;
       case AreaFilterType.all:
-      default:
-        return showNonSmoking
-            ? [..._smokingAreas, ..._nonSmokingAreas]
-            : _smokingAreas;
+        return [..._smokingAreas, ..._nonSmokingAreas];
     }
   }
 
@@ -274,7 +330,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
         ? LatLng(userPos.latitude, userPos.longitude)
         : const LatLng(35.90682384, 128.62055516);
 
-    final isZoomTooFarForNonSmoking = _currentZoom < kMinNonSmokingZoom;
+    final isClusterMode = _currentZoom < kMinAreaZoom;
 
     return Scaffold(
       body: _isLoading
@@ -322,15 +378,15 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                   ),
                 ),
 
-                // 4. 지도를 축소했을 때 금연구역 안내 툴팁 뱃지
-                if (isZoomTooFarForNonSmoking && _currentFilter != AreaFilterType.smokingOnly)
+                // 4. 지도를 축소했을 때 시·군·구 클러스터 안내 툴팁 뱃지
+                if (isClusterMode)
                   Positioned(
                     bottom: 24,
                     left: 20,
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF0F172A).withOpacity(0.85),
+                        color: const Color(0xFF0F172A).withOpacity(0.88),
                         borderRadius: BorderRadius.circular(20),
                         boxShadow: const [
                           BoxShadow(
@@ -343,10 +399,10 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                       child: const Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.zoom_in, color: Colors.orangeAccent, size: 18),
+                          Icon(Icons.touch_app, color: Colors.orangeAccent, size: 17),
                           SizedBox(width: 6),
                           Text(
-                            '지도를 확대하면 금연구역이 표시됩니다',
+                            '지역 배지를 누르면 해당 지역으로 확대됩니다',
                             style: TextStyle(
                               color: Colors.white,
                               fontSize: 12.5,
@@ -407,11 +463,6 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
   }
 
   Widget _buildFilterChips() {
-    final showNonSmoking = _currentZoom >= kMinNonSmokingZoom;
-    final nonSmokingLabel = showNonSmoking
-        ? '🚫 금연구역'
-        : '🚫 금연구역 (확대필요)';
-
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
@@ -430,7 +481,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
           ),
           const SizedBox(width: 8),
           _buildChip(
-            label: nonSmokingLabel,
+            label: '🚫 금연구역',
             filterType: AreaFilterType.nonSmokingOnly,
             activeColor: const Color(0xFFDC2626),
           ),
@@ -487,13 +538,14 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
 
   Widget _buildMapView(LatLng userLatLng) {
     final displayAreas = _displayedAreas;
+    final isClusterMode = _currentZoom < kMinAreaZoom;
 
     return FlutterMap(
       mapController: _mapController,
       options: MapOptions(
         initialCenter: userLatLng,
         initialZoom: 17.0,
-        minZoom: 5.0,
+        minZoom: 6.0,
         maxZoom: 19.0,
         interactionOptions: const InteractionOptions(
           flags: InteractiveFlag.all,
@@ -509,39 +561,40 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
           tileProvider: NetworkTileProvider(),
         ),
 
-        // 원형 반경 레이어
-        CircleLayer(
-          circles: displayAreas.map((area) {
-            final isInsideSmoking = _checkResult?.currentSmokingArea?.id == area.id;
-            final isInsideNonSmoking = _checkResult?.currentNonSmokingArea?.id == area.id;
+        // 원형 반경 레이어 (확대 모드일 때만)
+        if (!isClusterMode)
+          CircleLayer(
+            circles: displayAreas.map((area) {
+              final isInsideSmoking = _checkResult?.currentSmokingArea?.id == area.id;
+              final isInsideNonSmoking = _checkResult?.currentNonSmokingArea?.id == area.id;
 
-            if (area.isNonSmoking) {
-              return CircleMarker(
-                point: LatLng(area.latitude, area.longitude),
-                radius: area.radius,
-                useRadiusInMeter: true,
-                color: isInsideNonSmoking
-                    ? const Color(0xFFDC2626).withOpacity(0.40)
-                    : const Color(0xFFEF4444).withOpacity(0.18),
-                borderColor: const Color(0xFFDC2626),
-                borderStrokeWidth: isInsideNonSmoking ? 3.0 : 1.5,
-              );
-            } else {
-              return CircleMarker(
-                point: LatLng(area.latitude, area.longitude),
-                radius: area.radius,
-                useRadiusInMeter: true,
-                color: isInsideSmoking
-                    ? Colors.green.withOpacity(0.45)
-                    : Colors.orange.withOpacity(0.25),
-                borderColor: isInsideSmoking ? Colors.green : Colors.orange,
-                borderStrokeWidth: isInsideSmoking ? 3.0 : 1.5,
-              );
-            }
-          }).toList(),
-        ),
+              if (area.isNonSmoking) {
+                return CircleMarker(
+                  point: LatLng(area.latitude, area.longitude),
+                  radius: area.radius,
+                  useRadiusInMeter: true,
+                  color: isInsideNonSmoking
+                      ? const Color(0xFFDC2626).withOpacity(0.40)
+                      : const Color(0xFFEF4444).withOpacity(0.18),
+                  borderColor: const Color(0xFFDC2626),
+                  borderStrokeWidth: isInsideNonSmoking ? 3.0 : 1.5,
+                );
+              } else {
+                return CircleMarker(
+                  point: LatLng(area.latitude, area.longitude),
+                  radius: area.radius,
+                  useRadiusInMeter: true,
+                  color: isInsideSmoking
+                      ? Colors.green.withOpacity(0.45)
+                      : Colors.orange.withOpacity(0.25),
+                  borderColor: isInsideSmoking ? Colors.green : Colors.orange,
+                  borderStrokeWidth: isInsideSmoking ? 3.0 : 1.5,
+                );
+              }
+            }).toList(),
+          ),
 
-        // 마커 레이어
+        // 마커 레이어 (내 위치 + 확대 시 개별 구역 / 축소 시 시·군·구 클러스터 배지)
         MarkerLayer(
           rotate: true,
           markers: [
@@ -553,66 +606,208 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
               child: _buildUserLocationMarker(),
             ),
 
-            ...displayAreas.map((area) {
-              final isCurrent = area.isNonSmoking
-                  ? _checkResult?.currentNonSmokingArea?.id == area.id
-                  : _checkResult?.currentSmokingArea?.id == area.id;
+            // 1. 축소 시: 시·군·구 클러스터 배지
+            if (isClusterMode)
+              ..._visibleRegions.map((region) {
+                final counts = _areaService.cachedRegionCounts[region.code];
+                return Marker(
+                  point: LatLng(region.latitude, region.longitude),
+                  width: 118,
+                  height: 60,
+                  rotate: true,
+                  child: _buildDistrictClusterBadge(region, counts),
+                );
+              }),
 
-              final borderColor = area.isNonSmoking
-                  ? (isCurrent ? const Color(0xFF991B1B) : const Color(0xFFDC2626))
-                  : (isCurrent ? const Color(0xFF2E7D32) : const Color(0xFFD97706));
+            // 2. 확대 시: 개별 흡연구역 / 금연구역 마커
+            if (!isClusterMode)
+              ...displayAreas.map((area) {
+                final isCurrent = area.isNonSmoking
+                    ? _checkResult?.currentNonSmokingArea?.id == area.id
+                    : _checkResult?.currentSmokingArea?.id == area.id;
 
-              final iconAsset = area.isNonSmoking
-                  ? 'assets/images/no_smoke.png'
-                  : 'assets/images/app_logo.png';
+                final borderColor = area.isNonSmoking
+                    ? (isCurrent ? const Color(0xFF991B1B) : const Color(0xFFDC2626))
+                    : (isCurrent ? const Color(0xFF2E7D32) : const Color(0xFFD97706));
 
-              final fallbackIcon = area.isNonSmoking
-                  ? Icons.smoke_free
-                  : Icons.smoking_rooms;
+                final iconAsset = area.isNonSmoking
+                    ? 'assets/images/no_smoke.png'
+                    : 'assets/images/app_logo.png';
 
-              return Marker(
-                point: LatLng(area.latitude, area.longitude),
-                width: 44,
-                height: 44,
-                rotate: true,
-                child: GestureDetector(
-                  onTap: () => _showAreaDetails(area),
-                  child: Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Colors.black26,
-                          blurRadius: 6,
-                          offset: Offset(0, 2),
-                        ),
-                      ],
-                      border: Border.all(
-                        color: borderColor,
-                        width: isCurrent ? 3.0 : 2.0,
-                      ),
-                    ),
-                    child: ClipOval(
-                      child: Image.asset(
-                        iconAsset,
-                        fit: BoxFit.contain,
-                        errorBuilder: (context, error, stackTrace) => Icon(
-                          fallbackIcon,
+                final fallbackIcon = area.isNonSmoking
+                    ? Icons.smoke_free
+                    : Icons.smoking_rooms;
+
+                return Marker(
+                  point: LatLng(area.latitude, area.longitude),
+                  width: 44,
+                  height: 44,
+                  rotate: true,
+                  child: GestureDetector(
+                    onTap: () => _showAreaDetails(area),
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Colors.black26,
+                            blurRadius: 6,
+                            offset: Offset(0, 2),
+                          ),
+                        ],
+                        border: Border.all(
                           color: borderColor,
-                          size: 22,
+                          width: isCurrent ? 3.0 : 2.0,
+                        ),
+                      ),
+                      child: ClipOval(
+                        child: Image.asset(
+                          iconAsset,
+                          fit: BoxFit.contain,
+                          errorBuilder: (context, error, stackTrace) => Icon(
+                            fallbackIcon,
+                            color: borderColor,
+                            size: 22,
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-              );
-            }),
+                );
+              }),
           ],
         ),
       ],
     );
+  }
+
+  // 시·군·구 지역 묶음(클러스터) 배지 위젯
+  Widget _buildDistrictClusterBadge(DistrictRegion region, RegionCounts? counts) {
+    final borderColor = switch (_currentFilter) {
+      AreaFilterType.smokingOnly => const Color(0xFFD97706),
+      AreaFilterType.nonSmokingOnly => const Color(0xFFDC2626),
+      AreaFilterType.all => const Color(0xFF1E293B),
+    };
+
+    return GestureDetector(
+      onTap: () {
+        _mapController.move(
+          LatLng(region.latitude, region.longitude),
+          15.5,
+        );
+        _fetchVisibleAreas();
+      },
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.96),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: borderColor, width: 1.6),
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black26,
+                blurRadius: 6,
+                offset: Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                region.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF0F172A),
+                  height: 1.1,
+                ),
+              ),
+              const SizedBox(height: 3),
+              if (counts == null)
+                const SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.8,
+                    color: Color(0xFF64748B),
+                  ),
+                )
+              else
+                _buildClusterCountRow(counts),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildClusterCountRow(RegionCounts counts) {
+    switch (_currentFilter) {
+      case AreaFilterType.smokingOnly:
+        return Text(
+          '🚬 ${_formatCount(counts.smokingCount)}',
+          style: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            color: Color(0xFFD97706),
+          ),
+        );
+      case AreaFilterType.nonSmokingOnly:
+        return Text(
+          '🚫 ${_formatCount(counts.nonSmokingCount)}',
+          style: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            color: Color(0xFFDC2626),
+          ),
+        );
+      case AreaFilterType.all:
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '🚬${_formatCount(counts.smokingCount)}',
+              style: const TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFFD97706),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 3),
+              child: Text(
+                '·',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF94A3B8),
+                ),
+              ),
+            ),
+            Text(
+              '🚫${_formatCount(counts.nonSmokingCount)}',
+              style: const TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFFDC2626),
+              ),
+            ),
+          ],
+        );
+    }
+  }
+
+  String _formatCount(int count) {
+    if (count >= 10000) {
+      return '${(count / 1000).toStringAsFixed(1)}k';
+    }
+    return count.toString();
   }
 
   Widget _buildCompassButton() {

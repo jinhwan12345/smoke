@@ -22,11 +22,6 @@ class LocationCheckResult {
     required this.distanceToNearestSmoking,
     this.distanceToNearestNonSmoking = double.infinity,
   });
-
-  // 이전 코드 호환성용 getter
-  SmokingArea? get currentArea => currentSmokingArea ?? currentNonSmokingArea;
-  SmokingArea? get nearestArea => nearestSmokingArea ?? nearestNonSmokingArea;
-  double get distanceToNearest => distanceToNearestSmoking;
 }
 
 class LocationService {

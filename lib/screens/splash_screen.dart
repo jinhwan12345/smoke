@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import '../services/location_service.dart';
-import '../services/smoking_area_service.dart';
 import 'map_screen.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -15,7 +14,7 @@ class SplashScreen extends StatefulWidget {
 class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
-  String _statusText = '흡연구역 정보를 불러오는 중...';
+  final String _statusText = '현재 위치를 확인하는 중...';
 
   @override
   void initState() {
@@ -36,21 +35,13 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   Future<void> _initializeApp() async {
     final startTime = DateTime.now();
 
-    // 1. 흡연구역 데이터 로딩 (금연구역은 지도 화면에서 줌 레벨 및 뷰포트에 따라 초고속 동적 로딩)
-    final areaService = SmokingAreaService();
-    final smokingAreas = await areaService.loadSmokingAreas();
-
-    setState(() {
-      _statusText = '현재 위치를 확인하는 중...';
-    });
-
-    // 2. 위치 권한 및 현재 위치 확인
+    // 위치 권한 및 현재 위치 확인 (흡연/금연구역 모두 지도 화면에서 줌 레벨 및 뷰포트에 따라 동적 로딩)
     await LocationService.requestLocationPermission();
     Position initialPos = await LocationService.getCurrentPosition();
 
     // 경고 문구를 사용자가 충분히 읽을 수 있도록 최소 2.2초 대기
     final elapsed = DateTime.now().difference(startTime);
-    final minDisplayDuration = const Duration(milliseconds: 2200);
+    const minDisplayDuration = Duration(milliseconds: 2200);
     if (elapsed < minDisplayDuration) {
       await Future.delayed(minDisplayDuration - elapsed);
     }
@@ -62,7 +53,6 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
       PageRouteBuilder(
         transitionDuration: const Duration(milliseconds: 600),
         pageBuilder: (context, animation, secondaryAnimation) => MapScreen(
-          preloadedSmokingAreas: smokingAreas,
           initialPosition: initialPos,
         ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
