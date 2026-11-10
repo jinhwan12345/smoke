@@ -8,8 +8,10 @@ import '../models/district_region.dart';
 import '../models/smoking_area.dart';
 import '../services/location_service.dart';
 import '../services/smoking_area_service.dart';
+import '../services/update_service.dart';
 import '../widgets/status_banner.dart';
 import '../widgets/area_detail_sheet.dart';
+import '../widgets/update_dialog.dart';
 
 enum AreaFilterType {
   all,
@@ -95,7 +97,19 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     _areaService.loadAllDistrictCounts();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fetchVisibleAreas();
+      _checkAppUpdate();
     });
+  }
+
+  Future<void> _checkAppUpdate() async {
+    final updateInfo = await UpdateService.checkForUpdate();
+    if (updateInfo != null && mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => UpdateDialog(updateInfo: updateInfo),
+      );
+    }
   }
 
   // 사용자 위치 평가 (지오펜싱)
@@ -583,8 +597,9 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
         maxZoom: 19.0,
         interactionOptions: const InteractionOptions(
           flags: InteractiveFlag.all,
-          enableMultiFingerGestureRace: true,
-          rotationThreshold: 5.0,
+          enableMultiFingerGestureRace: false,
+          pinchZoomThreshold: 0.1,
+          rotationThreshold: 22.0,
         ),
         onPositionChanged: _onMapPositionChanged,
       ),
@@ -738,7 +753,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     final borderColor = switch (_currentFilter) {
       AreaFilterType.smokingOnly => const Color(0xFFD97706),
       AreaFilterType.nonSmokingOnly => const Color(0xFFDC2626),
-      AreaFilterType.all => const Color(0xFF2563EB),
+      AreaFilterType.all => const Color(0xFF1E293B),
     };
 
     return GestureDetector(
@@ -750,16 +765,16 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
       },
       child: Center(
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
-            color: const Color(0xFF0F172A).withOpacity(0.94),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: borderColor, width: 1.8),
+            color: Colors.white.withOpacity(0.96),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: borderColor, width: 1.6),
             boxShadow: const [
               BoxShadow(
-                color: Colors.black38,
-                blurRadius: 8,
-                offset: Offset(0, 3),
+                color: Colors.black26,
+                blurRadius: 6,
+                offset: Offset(0, 2),
               ),
             ],
           ),
@@ -771,9 +786,9 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                  fontSize: 12.5,
+                  fontSize: 12,
                   fontWeight: FontWeight.bold,
-                  color: Colors.white,
+                  color: Color(0xFF0F172A),
                   height: 1.1,
                 ),
               ),
@@ -784,14 +799,14 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                   height: 12,
                   child: CircularProgressIndicator(
                     strokeWidth: 1.8,
-                    color: Colors.white70,
+                    color: Color(0xFF64748B),
                   ),
                 )
               else
                 _buildCountRowByValues(
                   smokingCount: counts.smokingCount,
                   nonSmokingCount: counts.nonSmokingCount,
-                  isDarkBadge: true,
+                  isDarkBadge: false,
                 ),
             ],
           ),
