@@ -234,4 +234,19 @@ class SmokingAreaService {
     await loadAllDistrictCounts();
     return _regionCountsCache[region.code];
   }
+
+  // 6. 광역시·도(sidoKey) 단위 합산 흡연/금연구역 개수 반환
+  ({int smokingCount, int nonSmokingCount})? getProvinceCounts(String sidoKey) {
+    if (_regionCountsCache.isEmpty) return null;
+
+    int smoking = 0;
+    int nonSmoking = 0;
+    for (final entry in _regionCountsCache.values) {
+      if (entry.region.sidoKey == sidoKey) {
+        smoking += entry.smokingCount;
+        nonSmoking += entry.nonSmokingCount;
+      }
+    }
+    return (smokingCount: smoking, nonSmokingCount: nonSmoking);
+  }
 }

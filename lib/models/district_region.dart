@@ -35,6 +35,24 @@ class DistrictRegion {
   }
 }
 
+class ProvinceRegion {
+  final String sidoKey;    // 시·도 구분 키 (예: '서울', '경기', '부산')
+  final String name;       // 배지 표시명 (예: '서울', '경기', '부산')
+  final String fullName;   // 전체 행정구역명 (예: '서울특별시', '경기도')
+  final double latitude;
+  final double longitude;
+  final double targetZoom; // 배지 탭 시 이동할 줌 레벨
+
+  const ProvinceRegion({
+    required this.sidoKey,
+    required this.name,
+    required this.fullName,
+    required this.latitude,
+    required this.longitude,
+    this.targetZoom = 11.5,
+  });
+}
+
 class RegionCounts {
   final DistrictRegion region;
   final int smokingCount;
@@ -48,6 +66,27 @@ class RegionCounts {
 
   int get totalCount => smokingCount + nonSmokingCount;
 }
+
+/// 전국 17개 광역시·도 대표 좌표 목록 (축소 시 광역 클러스터 배지 표시용)
+const List<ProvinceRegion> kKoreaProvinces = [
+  ProvinceRegion(sidoKey: '서울', name: '서울', fullName: '서울특별시', latitude: 37.5665, longitude: 126.9780, targetZoom: 12.0),
+  ProvinceRegion(sidoKey: '인천', name: '인천', fullName: '인천광역시', latitude: 37.4563, longitude: 126.6322, targetZoom: 11.8),
+  ProvinceRegion(sidoKey: '경기', name: '경기', fullName: '경기도', latitude: 37.2750, longitude: 127.2000, targetZoom: 11.2),
+  ProvinceRegion(sidoKey: '강원', name: '강원', fullName: '강원특별자치도', latitude: 37.7500, longitude: 128.3000, targetZoom: 11.0),
+  ProvinceRegion(sidoKey: '충북', name: '충북', fullName: '충청북도', latitude: 36.8000, longitude: 127.7000, targetZoom: 11.2),
+  ProvinceRegion(sidoKey: '충남', name: '충남', fullName: '충청남도', latitude: 36.5500, longitude: 126.7500, targetZoom: 11.2),
+  ProvinceRegion(sidoKey: '세종', name: '세종', fullName: '세종특별자치시', latitude: 36.5200, longitude: 127.2500, targetZoom: 12.2),
+  ProvinceRegion(sidoKey: '대전', name: '대전', fullName: '대전광역시', latitude: 36.3200, longitude: 127.4000, targetZoom: 12.2),
+  ProvinceRegion(sidoKey: '전북', name: '전북', fullName: '전북특별자치도', latitude: 35.7500, longitude: 127.1500, targetZoom: 11.2),
+  ProvinceRegion(sidoKey: '광주', name: '광주', fullName: '광주광역시', latitude: 35.1600, longitude: 126.8500, targetZoom: 12.2),
+  ProvinceRegion(sidoKey: '전남', name: '전남', fullName: '전라남도', latitude: 34.8000, longitude: 126.9500, targetZoom: 11.0),
+  ProvinceRegion(sidoKey: '경북', name: '경북', fullName: '경상북도', latitude: 36.4500, longitude: 128.7500, targetZoom: 11.0),
+  ProvinceRegion(sidoKey: '대구', name: '대구', fullName: '대구광역시', latitude: 35.8700, longitude: 128.5900, targetZoom: 12.0),
+  ProvinceRegion(sidoKey: '울산', name: '울산', fullName: '울산광역시', latitude: 35.5500, longitude: 129.3100, targetZoom: 12.0),
+  ProvinceRegion(sidoKey: '경남', name: '경남', fullName: '경상남도', latitude: 35.3000, longitude: 128.2500, targetZoom: 11.2),
+  ProvinceRegion(sidoKey: '부산', name: '부산', fullName: '부산광역시', latitude: 35.1600, longitude: 129.0500, targetZoom: 12.0),
+  ProvinceRegion(sidoKey: '제주', name: '제주', fullName: '제주특별자치도', latitude: 33.3800, longitude: 126.5500, targetZoom: 11.2),
+];
 
 final Map<String, DistrictRegion> kDistrictByCode = {
   for (final d in kKoreaDistricts) d.code: d,
