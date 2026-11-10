@@ -13,15 +13,9 @@ class SmokingAreaService {
     'Authorization': 'Bearer $supabaseAnonKey',
   };
 
-  static const Map<String, String> _countHeaders = {
-    'apikey': supabaseAnonKey,
-    'Authorization': 'Bearer $supabaseAnonKey',
-    'Prefer': 'count=exact',
-  };
-
   // 지역(시·군·구)별 흡연/금연구역 개수 메모리 캐시 (중복 요청 방지)
   final Map<String, RegionCounts> _regionCountsCache = {};
-  final Set<String> _loadingRegionCodes = {};
+  Future<bool>? _loadingAllCountsFuture;
 
   Map<String, RegionCounts> get cachedRegionCounts => _regionCountsCache;
 
@@ -129,35 +123,106 @@ class SmokingAreaService {
     return (smoking: results[0], nonSmoking: results[1]);
   }
 
-  // 4. 특정 테이블의 영역 내 정확한 개수 조회 (HEAD + Prefer: count=exact)
-  Future<int> _countAreasInBounds({
-    required String table,
-    required double minLat,
-    required double maxLat,
-    required double minLng,
-    required double maxLng,
-  }) async {
+  // 4. district_counts 요약 테이블에서 전국 229개 시·군·구 구역 수 일괄 조회 (1회 요청)
+  Future<bool> loadAllDistrictCounts() {
+    if (_regionCountsCache.length >= kKoreaDistricts.length) {
+      return Future.value(true);
+    }
+    return _loadingAllCountsFuture ??= _fetchAllDistrictCountsInternal().whenComplete(() {
+      _loadingAllCountsFuture = null;
+    });
+  }
+
+  Future<bool> _fetchAllDistrictCountsInternal() async {
     try {
       final uri = Uri.parse(
-        '$supabaseUrl/rest/v1/$table?select=id&'
-        'latitude=gte.$minLat&latitude=lte.$maxLat&'
-        'longitude=gte.$minLng&longitude=lte.$maxLng&'
-        'limit=1',
+        '$supabaseUrl/rest/v1/district_counts?'
+        'select=code,smoking_count,non_smoking_count&limit=300',
       );
 
       final response = await http
-          .head(uri, headers: _countHeaders)
-          .timeout(const Duration(seconds: 5));
+          .get(uri, headers: _headers)
+          .timeout(const Duration(seconds: 6));
 
-      final contentRange = response.headers['content-range'];
-      if (contentRange != null && contentRange.contains('/')) {
-        final totalStr = contentRange.split('/').last;
-        return int.tryParse(totalStr) ?? 0;
+      if (response.statusCode == 200) {
+        final List<dynamic> jsonList = json.decode(response.body);
+        if (jsonList.isNotEmpty) {
+          for (final region in kKoreaDistricts) {
+            _regionCountsCache.putIfAbsent(
+              region.code,
+              () => RegionCounts(region: region, smokingCount: 0, nonSmokingCount: 0),
+            );
+          }
+
+          for (final item in jsonList) {
+            final code = item['code']?.toString() ?? '';
+            final region = kDistrictByCode[code];
+            if (region != null) {
+              final smokingCount = (item['smoking_count'] as num?)?.toInt() ?? 0;
+              final nonSmokingCount = (item['non_smoking_count'] as num?)?.toInt() ?? 0;
+              _regionCountsCache[code] = RegionCounts(
+                region: region,
+                smokingCount: smokingCount,
+                nonSmokingCount: nonSmokingCount,
+              );
+            }
+          }
+          return true;
+        }
       }
     } catch (e) {
-      debugPrint('Supabase $table 개수 조회 에러: $e');
+      debugPrint('Supabase district_counts 일괄 조회 에러: $e');
     }
-    return 0;
+
+    // Fallback: district_counts 테이블 생성 전인 경우 smoking_areas를 주소 기준으로 집계
+    return _fallbackAggregateSmokingAreasByAddress();
+  }
+
+  Future<bool> _fallbackAggregateSmokingAreasByAddress() async {
+    try {
+      final uri = Uri.parse(
+        '$supabaseUrl/rest/v1/smoking_areas?'
+        'select=id,lnmadr,rdnmadr,latitude,longitude&limit=5000',
+      );
+
+      final response = await http
+          .get(uri, headers: _headers)
+          .timeout(const Duration(seconds: 6));
+
+      if (response.statusCode == 200) {
+        final List<dynamic> jsonList = json.decode(response.body);
+        final Map<String, int> smokingByCode = {};
+
+        for (final item in jsonList) {
+          final lnmadr = item['lnmadr']?.toString() ?? '';
+          final rdnmadr = item['rdnmadr']?.toString() ?? '';
+          final lat = (item['latitude'] as num?)?.toDouble();
+          final lng = (item['longitude'] as num?)?.toDouble();
+
+          final code = resolveDistrictCodeFromAddress(
+            roadAddress: rdnmadr,
+            lotAddress: lnmadr,
+            latitude: lat,
+            longitude: lng,
+          );
+          if (code != null) {
+            smokingByCode[code] = (smokingByCode[code] ?? 0) + 1;
+          }
+        }
+
+        for (final region in kKoreaDistricts) {
+          _regionCountsCache[region.code] = RegionCounts(
+            region: region,
+            smokingCount: smokingByCode[region.code] ?? 0,
+            nonSmokingCount: 0,
+          );
+        }
+        return true;
+      }
+    } catch (e) {
+      debugPrint('Fallback 흡연구역 주소별 집계 에러: $e');
+    }
+    return false;
   }
 
   // 5. 단일 시·군·구 지역의 흡연/금연구역 개수 조회 및 캐싱
@@ -165,38 +230,8 @@ class SmokingAreaService {
     if (_regionCountsCache.containsKey(region.code)) {
       return _regionCountsCache[region.code];
     }
-    if (_loadingRegionCodes.contains(region.code)) {
-      return null;
-    }
 
-    _loadingRegionCodes.add(region.code);
-    try {
-      final counts = await Future.wait([
-        _countAreasInBounds(
-          table: 'smoking_areas',
-          minLat: region.minLat,
-          maxLat: region.maxLat,
-          minLng: region.minLng,
-          maxLng: region.maxLng,
-        ),
-        _countAreasInBounds(
-          table: 'non_smoking_areas',
-          minLat: region.minLat,
-          maxLat: region.maxLat,
-          minLng: region.minLng,
-          maxLng: region.maxLng,
-        ),
-      ]);
-
-      final result = RegionCounts(
-        region: region,
-        smokingCount: counts[0],
-        nonSmokingCount: counts[1],
-      );
-      _regionCountsCache[region.code] = result;
-      return result;
-    } finally {
-      _loadingRegionCodes.remove(region.code);
-    }
+    await loadAllDistrictCounts();
+    return _regionCountsCache[region.code];
   }
 }

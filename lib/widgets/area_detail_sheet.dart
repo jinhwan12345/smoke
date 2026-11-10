@@ -151,94 +151,97 @@ class AreaDetailSheet extends StatelessWidget {
               ),
             ),
 
-          // 1. 도로명 주소 카드
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF1F5F9),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFFE2E8F0)),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF2563EB),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: const Text(
-                    '도로명',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
+          // 1. 도로명 주소 카드 (도로명주소가 있거나, 두 주소 모두 없을 때 표시)
+          if (area.hasRoadAddress || !area.hasLotAddress)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF1F5F9),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2563EB),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Text(
+                      '도로명',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    roadAddr,
-                    style: TextStyle(
-                      fontSize: 13.5,
-                      color: area.hasRoadAddress ? const Color(0xFF1E293B) : Colors.grey[500],
-                      fontWeight: FontWeight.w500,
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      roadAddr,
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        color: area.hasRoadAddress ? const Color(0xFF1E293B) : Colors.grey[500],
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
-                ),
-                if (area.hasRoadAddress)
-                  IconButton(
-                    icon: const Icon(Icons.copy, size: 16, color: Color(0xFF64748B)),
-                    tooltip: '도로명주소 복사',
-                    constraints: const BoxConstraints(),
-                    padding: const EdgeInsets.all(6),
-                    onPressed: () => _copyToClipboard(context, area.roadAddress, '도로명주소'),
-                  ),
-              ],
+                  if (area.hasRoadAddress)
+                    IconButton(
+                      icon: const Icon(Icons.copy, size: 16, color: Color(0xFF64748B)),
+                      tooltip: '도로명주소 복사',
+                      constraints: const BoxConstraints(),
+                      padding: const EdgeInsets.all(6),
+                      onPressed: () => _copyToClipboard(context, area.roadAddress, '도로명주소'),
+                    ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
 
-          // 2. 지번 주소 카드
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF1F5F9),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFFE2E8F0)),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF0D9488),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: const Text(
-                    '지번',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
+          if (area.hasRoadAddress && area.hasLotAddress)
+            const SizedBox(height: 8),
+
+          // 2. 지번 주소 카드 (지번주소가 있을 때 표시)
+          if (area.hasLotAddress)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF1F5F9),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0D9488),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Text(
+                      '지번',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    lotAddr,
-                    style: TextStyle(
-                      fontSize: 13.5,
-                      color: area.hasLotAddress ? const Color(0xFF1E293B) : Colors.grey[500],
-                      fontWeight: FontWeight.w500,
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      lotAddr,
+                      style: const TextStyle(
+                        fontSize: 13.5,
+                        color: Color(0xFF1E293B),
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
-                ),
-                if (area.hasLotAddress)
                   IconButton(
                     icon: const Icon(Icons.copy, size: 16, color: Color(0xFF64748B)),
                     tooltip: '지번주소 복사',
@@ -246,9 +249,9 @@ class AreaDetailSheet extends StatelessWidget {
                     padding: const EdgeInsets.all(6),
                     onPressed: () => _copyToClipboard(context, area.lotAddress, '지번주소'),
                   ),
-              ],
+                ],
+              ),
             ),
-          ),
           const SizedBox(height: 14),
 
           // 거리 & 면적 & 유효 반경 & 기준일자

@@ -21,6 +21,18 @@ class DistrictRegion {
   double get maxLat => latitude + radiusLat;
   double get minLng => longitude - radiusLng;
   double get maxLng => longitude + radiusLng;
+
+  String get sidoKey {
+    if (code == 'sejong') return '세종';
+    final parts = fullName.split(' ');
+    return parts.first;
+  }
+
+  String get sigunguName {
+    if (code == 'sejong') return '세종시';
+    final parts = fullName.split(' ');
+    return parts.length > 1 ? parts[1] : parts.first;
+  }
 }
 
 class RegionCounts {
@@ -35,6 +47,108 @@ class RegionCounts {
   });
 
   int get totalCount => smokingCount + nonSmokingCount;
+}
+
+final Map<String, DistrictRegion> kDistrictByCode = {
+  for (final d in kKoreaDistricts) d.code: d,
+};
+
+/// 주소(도로명주소/지번주소 중 하나만 있어도 무방)와 좌표를 기반으로 229개 시·군·구 코드(code)를 판별합니다.
+String? resolveDistrictCodeFromAddress({
+  required String roadAddress,
+  required String lotAddress,
+  double? latitude,
+  double? longitude,
+}) {
+  // 도로명주소와 지번주소 중 존재하는 주소들을 순서대로 검사 (한 가지만 있어도 정상 동작)
+  final addresses = <String>[
+    if (roadAddress.trim().isNotEmpty) roadAddress.trim(),
+    if (lotAddress.trim().isNotEmpty) lotAddress.trim(),
+  ];
+
+  for (final rawAddr in addresses) {
+    final tokens = rawAddr.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
+    final w1 = tokens.isNotEmpty ? tokens[0] : '';
+    final w2 = tokens.length > 1 ? tokens[1] : '';
+
+    if (w1.startsWith('세종') || w2.startsWith('세종')) {
+      return 'sejong';
+    }
+    if (w1.startsWith('인천') && w2 == '남구') {
+      return 'incheon_michuhol';
+    }
+    if (w1 == '군위군' || w2 == '군위군') {
+      return 'daegu_gunwi';
+    }
+
+    const muanTowns = {'무안읍', '삼향읍', '일로읍', '청계면', '해제면', '몽탄면', '현경면', '망운면', '운남면'};
+    if (muanTowns.contains(w1)) {
+      return 'jn_muan';
+    }
+
+    const haenamTowns = {
+      '해남읍', '옥천면', '산이면', '송지면', '문내면', '화원면',
+      '계곡면', '삼산면', '화산면', '현산면', '북평면', '북일면',
+    };
+    if (haenamTowns.contains(w1) && (latitude == null || latitude < 35.0)) {
+      return 'jn_haenam';
+    }
+
+    List<DistrictRegion> candidates = kKoreaDistricts.where((d) => d.sigunguName == w2).toList();
+    if (candidates.isEmpty && w1.isNotEmpty) {
+      candidates = kKoreaDistricts.where((d) => d.sigunguName == w1).toList();
+    }
+
+    if (candidates.length == 1) {
+      return candidates.first.code;
+    }
+
+    if (candidates.length > 1) {
+      final isJeonnamGwangju = w1.contains('전남') ||
+          w1.startsWith('전라남도') ||
+          w1.contains('광주');
+
+      for (final d in candidates) {
+        final sido = d.sidoKey;
+        if (w1.startsWith(sido) ||
+            ((sido == '광주' || sido == '전남') && isJeonnamGwangju) ||
+            (sido == '경북' && w1.startsWith('경상북도')) ||
+            (sido == '경남' && w1.startsWith('경상남도')) ||
+            (sido == '충북' && w1.startsWith('충청북도')) ||
+            (sido == '충남' && w1.startsWith('충청남도')) ||
+            (sido == '전북' && (w1.startsWith('전라북도') || w1.startsWith('전북')))) {
+          return d.code;
+        }
+      }
+
+      if (latitude != null && longitude != null) {
+        candidates.sort((a, b) {
+          final distA = (a.latitude - latitude) * (a.latitude - latitude) +
+              (a.longitude - longitude) * (a.longitude - longitude);
+          final distB = (b.latitude - latitude) * (b.latitude - latitude) +
+              (b.longitude - longitude) * (b.longitude - longitude);
+          return distA.compareTo(distB);
+        });
+      }
+      return candidates.first.code;
+    }
+  }
+
+  if (latitude != null && longitude != null) {
+    DistrictRegion? nearest;
+    double minDist = double.infinity;
+    for (final d in kKoreaDistricts) {
+      final dist = (d.latitude - latitude) * (d.latitude - latitude) +
+          (d.longitude - longitude) * (d.longitude - longitude);
+      if (dist < minDist) {
+        minDist = dist;
+        nearest = d;
+      }
+    }
+    return nearest?.code;
+  }
+
+  return null;
 }
 
 /// 전국 시·군·구 대표 좌표 및 영역 목록

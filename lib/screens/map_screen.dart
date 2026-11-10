@@ -86,7 +86,8 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
       _evaluateUserLocation(pos);
     });
 
-    // 4. 첫 화면 Bounding Box 내 흡연/금연구역 로드
+    // 4. 첫 화면 Bounding Box 내 흡연/금연구역 로드 및 전국 지역별 구역 수 요약 캐싱
+    _areaService.loadAllDistrictCounts();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fetchVisibleAreas();
     });
@@ -146,10 +147,9 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     }
   }
 
-  // 현재 화면에 들어오는 시·군·구 목록 즉시 계산 (화면 중심 가까운 순 최대 25개)
+  // 현재 화면에 들어오는 모든 시·군·구 목록 즉시 계산 (개수 제한 없음)
   void _updateVisibleDistrictsImmediate(MapCamera camera) {
     final bounds = camera.visibleBounds;
-    final center = camera.center;
 
     final inView = kKoreaDistricts.where((d) {
       return d.latitude >= bounds.south &&
@@ -158,33 +158,19 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
           d.longitude <= bounds.east;
     }).toList();
 
-    inView.sort((a, b) {
-      final distA = (a.latitude - center.latitude) * (a.latitude - center.latitude) +
-          (a.longitude - center.longitude) * (a.longitude - center.longitude);
-      final distB = (b.latitude - center.latitude) * (b.latitude - center.latitude) +
-          (b.longitude - center.longitude) * (b.longitude - center.longitude);
-      return distA.compareTo(distB);
-    });
-
-    final selected = inView.take(25).toList();
     setState(() {
-      _visibleRegions = selected;
+      _visibleRegions = inView;
     });
   }
 
-  // 화면에 보이는 시·군·구의 흡연구역/금연구역 개수 비동기 조회
+  // 화면에 보이는 시·군·구의 흡연구역/금연구역 개수 비동기 조회 (district_counts 일괄 로드)
   Future<void> _fetchVisibleDistrictCounts() async {
     if (_currentZoom >= kMinAreaZoom) return;
+    if (_areaService.cachedRegionCounts.length >= kKoreaDistricts.length) return;
 
-    final targets = List<DistrictRegion>.from(_visibleRegions);
-    for (final region in targets) {
-      if (!mounted || _currentZoom >= kMinAreaZoom) break;
-      if (_areaService.cachedRegionCounts.containsKey(region.code)) continue;
-
-      final res = await _areaService.fetchRegionCounts(region);
-      if (res != null && mounted && _currentZoom < kMinAreaZoom) {
-        setState(() {});
-      }
+    final loaded = await _areaService.loadAllDistrictCounts();
+    if (loaded && mounted && _currentZoom < kMinAreaZoom) {
+      setState(() {});
     }
   }
 
