@@ -53,10 +53,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
-          name: v1.0.${{ github.run_number }} (Build #${{ github.run_number }})
-          body: |
-            자동 빌드 릴리즈 (v1.0.${{ github.run_number }})
-            변경 사항: ${{ github.event.head_commit.message }}
+          name: v1.0.${{ github.run_number }}
+          body: v1.0.${{ github.run_number }}
           files: build/app/outputs/flutter-apk/app-release.apk
           draft: false
           prerelease: false

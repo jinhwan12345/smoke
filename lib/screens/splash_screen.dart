@@ -87,7 +87,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     return Scaffold(
       backgroundColor: SketchColors.paper,
       body: NotebookPaperBackground(
-        showMarginLine: true,
+        showMarginLine: false,
         showDoodles: true,
         child: SafeArea(
           child: FadeTransition(

@@ -144,27 +144,17 @@ class _UpdateDialogState extends State<UpdateDialog> {
                     cornerRadius: 10,
                     doubleStroke: false,
                     seed: 115,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     child: SizedBox(
                       width: double.infinity,
                       child: Text(
                         '현재 v${info.currentVersionName}  →  최신 ${info.latestVersionTag}',
+                        textAlign: TextAlign.center,
                         style: SketchTextStyles.label(
-                          size: 15.5,
+                          size: 16,
                           color: SketchColors.ink,
                         ),
                       ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    info.releaseNotes,
-                    maxLines: 5,
-                    overflow: TextOverflow.ellipsis,
-                    style: SketchTextStyles.body(
-                      size: 15.5,
-                      color: SketchColors.inkMuted,
-                      height: 1.35,
                     ),
                   ),
                   if (_isDownloading) ...[
