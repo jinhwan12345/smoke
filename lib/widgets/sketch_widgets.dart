@@ -691,7 +691,6 @@ class NotebookPaperBackground extends StatelessWidget {
     return CustomPaint(
       painter: _NotebookPaperPainter(
         showMarginLine: showMarginLine,
-        showDoodles: showDoodles,
       ),
       child: child,
     );
@@ -700,11 +699,9 @@ class NotebookPaperBackground extends StatelessWidget {
 
 class _NotebookPaperPainter extends CustomPainter {
   final bool showMarginLine;
-  final bool showDoodles;
 
   _NotebookPaperPainter({
     required this.showMarginLine,
-    required this.showDoodles,
   });
 
   @override
@@ -735,45 +732,6 @@ class _NotebookPaperPainter extends CustomPainter {
         ..strokeWidth = 1.5;
       canvas.drawLine(Offset(32, 0), Offset(32, size.height), marginPaint);
     }
-
-    // 구석에 대충 쓱싹 그린 연필 낙서(별, 연기 꼬불이, 화살표)
-    if (showDoodles) {
-      final doodlePaint = Paint()
-        ..color = SketchColors.ink.withOpacity(0.11)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.8
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round;
-
-      // 우상단 꼬불꼬불 별 낙서
-      _drawStarDoodle(canvas, Offset(size.width - 42, 66), 12, doodlePaint);
-      // 좌하단 꼬불꼬불 연기 선
-      final squiggle = Path()
-        ..moveTo(46, size.height - 120)
-        ..quadraticBezierTo(30, size.height - 135, 50, size.height - 150)
-        ..quadraticBezierTo(68, size.height - 165, 44, size.height - 180);
-      canvas.drawPath(squiggle, doodlePaint);
-
-      // 우하단 작은 빗금 세 줄
-      for (int i = 0; i < 3; i++) {
-        canvas.drawLine(
-          Offset(size.width - 54 + i * 8, size.height - 86),
-          Offset(size.width - 44 + i * 8, size.height - 102),
-          doodlePaint,
-        );
-      }
-    }
-  }
-
-  void _drawStarDoodle(Canvas canvas, Offset c, double r, Paint paint) {
-    final path = Path()
-      ..moveTo(c.dx, c.dy - r)
-      ..lineTo(c.dx + r * 0.65, c.dy + r * 0.85)
-      ..lineTo(c.dx - r * 0.9, c.dy - r * 0.25)
-      ..lineTo(c.dx + r * 0.9, c.dy - r * 0.25)
-      ..lineTo(c.dx - r * 0.65, c.dy + r * 0.85)
-      ..close();
-    canvas.drawPath(path, paint);
   }
 
   @override
