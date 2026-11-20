@@ -17,7 +17,7 @@ class SplashScreen extends StatefulWidget {
 class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
-  final String _statusText = '현재 위치를 쓱싹 찾는 중...';
+  final String _statusText = '현재 위치를 찾는 중...';
 
   @override
   void initState() {
@@ -139,7 +139,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                           ),
                           const SizedBox(height: 6),
                           Text(
-                            '내 주변 흡연·금연구역 낙서지도',
+                            '내 주변 흡연·금연구역 지도',
                             style: SketchTextStyles.body(
                               size: 18,
                               color: SketchColors.inkMuted,
