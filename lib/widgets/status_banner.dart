@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/location_service.dart';
+import '../theme/sketch_theme.dart';
+import 'sketch_widgets.dart';
 
 class StatusBanner extends StatelessWidget {
   final LocationCheckResult? checkResult;
@@ -10,6 +12,13 @@ class StatusBanner extends StatelessWidget {
     required this.checkResult,
     this.onTap,
   });
+
+  String _formatDistance(double meters) {
+    if (meters >= 1000) {
+      return '${(meters / 1000).toStringAsFixed(1)}km';
+    }
+    return '${meters.toInt()}m';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -24,112 +33,122 @@ class StatusBanner extends StatelessWidget {
     final nearestSmoking = checkResult!.nearestSmokingArea;
     final distSmoking = checkResult!.distanceToNearestSmoking;
 
-    // 배너 배경색, 아이콘, 텍스트 상태 분기
-    final Color primaryColor;
+    final Color paperColor;
+    final Color accentColor;
     final String statusTitle;
     final String statusSubtitle;
     final String iconAsset;
     final IconData fallbackIcon;
+    final bool hasTarget;
 
     if (isInsideSmoking) {
-      primaryColor = const Color(0xFF2E7D32); // 초록색 (안전 흡연 구역)
-      statusTitle = '현재 흡연구역 내부입니다 🚬';
+      paperColor = SketchColors.safeFill;
+      accentColor = SketchColors.safeGreen;
+      statusTitle = '여긴 흡연구역 내부예요!';
       statusSubtitle = currentSmoking?.name ?? '지정 흡연구역';
-      iconAsset = 'assets/images/app_logo.png';
+      iconAsset = 'assets/images/doodle_smoke.png';
       fallbackIcon = Icons.smoking_rooms;
+      hasTarget = currentSmoking != null;
     } else if (isInsideNonSmoking) {
-      primaryColor = const Color(0xFFC62828); // 붉은색 (경고 금연 구역)
-      statusTitle = '현재 지정 금연구역 내부입니다 🚫';
-      statusSubtitle = '${currentNonSmoking?.name ?? "지정 금연구역"} (흡연 시 과태료 부과)';
-      iconAsset = 'assets/images/no_smoke.png';
+      paperColor = SketchColors.noSmokeFill;
+      accentColor = SketchColors.noSmokeRed;
+      statusTitle = '잠깐! 지정 금연구역이에요!';
+      statusSubtitle = '${currentNonSmoking?.name ?? "지정 금연구역"} (과태료 주의)';
+      iconAsset = 'assets/images/doodle_no_smoke.png';
       fallbackIcon = Icons.smoke_free;
+      hasTarget = currentNonSmoking != null;
     } else {
-      primaryColor = const Color(0xFF334155); // 슬레이트 색상 (일반 구역)
-      statusTitle = '현재 일반 구역(비흡연구역)입니다 🚶';
+      paperColor = SketchColors.paperWarm;
+      accentColor = SketchColors.ink;
+      statusTitle = '현재 일반 구역이에요';
       if (nearestSmoking != null && distSmoking != double.infinity) {
-        statusSubtitle = '가장 가까운 흡연구역: ${distSmoking.toInt()}m (${nearestSmoking.name})';
+        statusSubtitle =
+            '내 주변 가까운 흡연구역: ${_formatDistance(distSmoking)} (${nearestSmoking.name})';
+        hasTarget = true;
       } else {
-        statusSubtitle = '주변에 등록된 흡연구역이 없습니다.';
+        statusSubtitle = '내 주변에 등록된 흡연구역이 없어요';
+        hasTarget = false;
       }
-      iconAsset = 'assets/images/no_smoke.png';
-      fallbackIcon = Icons.info_outline;
+      iconAsset = 'assets/images/doodle_walker.png';
+      fallbackIcon = Icons.directions_walk;
     }
 
-    return Container(
-      decoration: BoxDecoration(
-        color: primaryColor,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.25),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+    return SketchBox(
+      fillColor: paperColor,
+      borderColor: accentColor,
+      shadowColor: SketchColors.ink,
+      strokeWidth: 2.4,
+      cornerRadius: 16,
+      shadowOffset: const Offset(3.5, 4.5),
+      seed: 17,
+      onTap: onTap,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+      child: Row(
+        children: [
+          SketchCircle(
+            size: 50,
+            fillColor: SketchColors.paper,
+            borderColor: accentColor,
+            strokeWidth: 2.0,
+            shadowOffset: const Offset(1.5, 2.0),
+            seed: 29,
+            child: Padding(
+              padding: const EdgeInsets.all(5),
+              child: Image.asset(
+                iconAsset,
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) => Icon(
+                  fallbackIcon,
+                  color: accentColor,
+                  size: 24,
+                ),
+              ),
+            ),
           ),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            child: Row(
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Container(
-                  width: 46,
-                  height: 46,
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.18),
-                        blurRadius: 6,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: ClipOval(
-                    child: Image.asset(
-                      iconAsset,
-                      fit: BoxFit.contain,
-                      errorBuilder: (context, error, stackTrace) => Icon(
-                        fallbackIcon,
-                        color: primaryColor,
-                        size: 26,
-                      ),
-                    ),
+                Text(
+                  statusTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: SketchTextStyles.title(
+                    size: 19.5,
+                    color: isInsideNonSmoking
+                        ? SketchColors.noSmokeDark
+                        : isInsideSmoking
+                            ? const Color(0xFF14532D)
+                            : SketchColors.ink,
                   ),
                 ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        statusTitle,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        statusSubtitle,
-                        style: const TextStyle(color: Colors.white70, fontSize: 13),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
+                const SizedBox(height: 2),
+                Text(
+                  statusSubtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: SketchTextStyles.body(
+                    size: 14.5,
+                    color: SketchColors.inkMuted,
+                    weight: FontWeight.w700,
                   ),
                 ),
               ],
             ),
           ),
-        ),
+          if (hasTarget) ...[
+            const SizedBox(width: 6),
+            Text(
+              '→',
+              style: SketchTextStyles.title(
+                size: 20,
+                color: accentColor,
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

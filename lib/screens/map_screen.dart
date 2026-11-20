@@ -9,9 +9,11 @@ import '../models/smoking_area.dart';
 import '../services/location_service.dart';
 import '../services/smoking_area_service.dart';
 import '../services/update_service.dart';
+import '../theme/sketch_theme.dart';
 import '../widgets/status_banner.dart';
 import '../widgets/area_detail_sheet.dart';
 import '../widgets/update_dialog.dart';
+import '../widgets/sketch_widgets.dart';
 
 enum AreaFilterType {
   all,
@@ -42,13 +44,32 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
   static const double kMinDistrictZoom = 11.0;
   static const double kMinAreaZoom = 15.0;
 
+  // 종이 지도처럼 아주 살짝 따뜻한 톤을 입히는 컬러 매트릭스 (가독성 유지)
+  static const ColorFilter _warmPaperMapFilter = ColorFilter.matrix(<double>[
+    0.98, 0.02, 0.00, 0, 4,
+    0.01, 0.96, 0.01, 0, 2,
+    0.00, 0.02, 0.89, 0, -2,
+    0.00, 0.00, 0.00, 1, 0,
+  ]);
+
   StreamSubscription<Position>? _positionStream;
   Position? _currentPosition;
+  Position? _lastNearbyFetchPosition; // 내 위치 주변 구역을 마지막으로 조회한 GPS 좌표
+  bool _isFetchingNearby = false;
 
-  List<SmokingArea> _smokingAreas = [];        // 현재 화면(BBox) 내 동적 흡연구역
-  List<SmokingArea> _nonSmokingAreas = [];     // 현재 화면(BBox) 내 동적 금연구역
+  // 내 실제 위치(GPS) 주변 구역 (상단 상태 배너 및 지오펜싱 판정 전용 — 지도 이동에 영향받지 않음)
+  List<SmokingArea> _nearbySmokingAreas = [];
+  List<SmokingArea> _nearbyNonSmokingAreas = [];
+
+  // 현재 지도 화면(Viewport BBox) 내 구역 (지도 마커/원형 반경 렌더링 전용)
+  List<SmokingArea> _visibleSmokingAreas = [];
+  List<SmokingArea> _visibleNonSmokingAreas = [];
+
   List<DistrictRegion> _visibleRegions = [];   // 중간 축소 시 현재 화면에 보이는 시·군·구 목록
   List<ProvinceRegion> _visibleProvinces = []; // 많이 축소 시 현재 화면에 보이는 광역시·도 목록
+
+  // 내 위치 주변 구역을 다시 조회할 이동 임계 거리 (미터)
+  static const double kNearbyRefetchDistanceMeters = 250.0;
 
   LocationCheckResult? _checkResult;
   bool _isLoading = true;
@@ -57,6 +78,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
 
   AreaFilterType _currentFilter = AreaFilterType.all;
   Timer? _boundsDebounceTimer;
+  int _viewportFetchSeq = 0; // 빠른 지도 이동 시 이전 느린 응답이 최신 화면을 덮어쓰는 것 방지
 
   AnimationController? _rotationAnimationController;
   Animation<double>? _rotationAnimation;
@@ -73,13 +95,23 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     Position initialPos = widget.initialPosition ?? await LocationService.getCurrentPosition();
     _currentPosition = initialPos;
 
-    // 2. 내 위치 주변 흡연/금연구역 1차 로드 (초기 지오펜싱용)
-    final nearby = await _areaService.loadNearbyAreas(
-      userLat: initialPos.latitude,
-      userLng: initialPos.longitude,
+    // 2. 스플래시에서 사전 로딩해 둔 내 주변 데이터가 있으면 대기 없이 즉시(0ms) 사용
+    final preloaded = _areaService.takePreloadedNearby(
+      initialPos.latitude,
+      initialPos.longitude,
     );
-    _smokingAreas = nearby.smoking;
-    _nonSmokingAreas = nearby.nonSmoking;
+    final nearby = preloaded ??
+        await _areaService.loadNearbyAreas(
+          userLat: initialPos.latitude,
+          userLng: initialPos.longitude,
+        );
+    _lastNearbyFetchPosition = initialPos;
+    _nearbySmokingAreas = nearby.smoking;
+    _nearbyNonSmokingAreas = nearby.nonSmoking;
+
+    // 초기 화면도 내 위치 중심이므로 마커 초기값으로 우선 채움
+    _visibleSmokingAreas = nearby.smoking;
+    _visibleNonSmokingAreas = nearby.nonSmoking;
 
     _evaluateUserLocation(initialPos);
 
@@ -91,6 +123,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     _positionStream = LocationService.getPositionStream().listen((pos) {
       _currentPosition = pos;
       _evaluateUserLocation(pos);
+      _maybeRefreshNearbyAreas(pos);
     });
 
     // 4. 첫 화면 Bounding Box 내 흡연/금연구역 로드 및 전국 지역별 구역 수 요약 캐싱
@@ -99,6 +132,36 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
       _fetchVisibleAreas();
       _checkAppUpdate();
     });
+  }
+
+  // 사용자가 실제로 일정 거리(250m) 이상 이동했을 때만 내 주변 구역 목록 재조회
+  Future<void> _maybeRefreshNearbyAreas(Position pos) async {
+    if (_isFetchingNearby) return;
+    if (_lastNearbyFetchPosition != null) {
+      final moved = Geolocator.distanceBetween(
+        _lastNearbyFetchPosition!.latitude,
+        _lastNearbyFetchPosition!.longitude,
+        pos.latitude,
+        pos.longitude,
+      );
+      if (moved < kNearbyRefetchDistanceMeters) return;
+    }
+
+    _isFetchingNearby = true;
+    try {
+      final nearby = await _areaService.loadNearbyAreas(
+        userLat: pos.latitude,
+        userLng: pos.longitude,
+      );
+      _lastNearbyFetchPosition = pos;
+      if (mounted) {
+        _nearbySmokingAreas = nearby.smoking;
+        _nearbyNonSmokingAreas = nearby.nonSmoking;
+        _evaluateUserLocation(_currentPosition ?? pos);
+      }
+    } finally {
+      _isFetchingNearby = false;
+    }
   }
 
   Future<void> _checkAppUpdate() async {
@@ -112,9 +175,9 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     }
   }
 
-  // 사용자 위치 평가 (지오펜싱)
+  // 사용자 위치 평가 (지오펜싱) — 항상 '내 실제 위치 주변 구역'만 기준으로 판정
   void _evaluateUserLocation(Position position) {
-    final combined = <SmokingArea>[..._smokingAreas, ..._nonSmokingAreas];
+    final combined = <SmokingArea>[..._nearbySmokingAreas, ..._nearbyNonSmokingAreas];
     setState(() {
       _checkResult = LocationService.evaluateLocation(
         userLat: position.latitude,
@@ -141,26 +204,33 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
 
     if (_currentZoom >= kMinAreaZoom) {
       // 1단계 (줌 15.0 이상): 개별 흡연/금연구역 마커 표시
+      // 먼저 타일 캐시에 있는 구역을 디바운스 없이 즉시(0ms) 반영
+      final allCached = _applyCachedVisibleAreas(camera.visibleBounds);
+
       if (prevZoom < kMinAreaZoom || _visibleRegions.isNotEmpty || _visibleProvinces.isNotEmpty) {
         setState(() {
           _visibleRegions = [];
           _visibleProvinces = [];
         });
       }
+
       _boundsDebounceTimer?.cancel();
-      _boundsDebounceTimer = Timer(const Duration(milliseconds: 300), () {
-        _fetchVisibleAreas();
-      });
+      // 현재 화면의 모든 타일이 이미 캐시에 있다면 네트워크 요청 자체를 생략!
+      if (!allCached) {
+        _boundsDebounceTimer = Timer(const Duration(milliseconds: 150), () {
+          _fetchVisibleAreas();
+        });
+      }
     } else if (_currentZoom >= kMinDistrictZoom) {
       // 2단계 (줌 11.0 이상 ~ 15.0 미만): 시·군·구 클러스터 배지 표시
-      if (_smokingAreas.isNotEmpty ||
-          _nonSmokingAreas.isNotEmpty ||
+      if (_visibleSmokingAreas.isNotEmpty ||
+          _visibleNonSmokingAreas.isNotEmpty ||
           _visibleProvinces.isNotEmpty ||
           prevZoom >= kMinAreaZoom ||
           prevZoom < kMinDistrictZoom) {
         setState(() {
-          _smokingAreas = [];
-          _nonSmokingAreas = [];
+          _visibleSmokingAreas = [];
+          _visibleNonSmokingAreas = [];
           _visibleProvinces = [];
         });
       }
@@ -171,13 +241,13 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
       });
     } else {
       // 3단계 (줌 11.0 미만): 17개 광역시·도 통합 클러스터 배지 표시
-      if (_smokingAreas.isNotEmpty ||
-          _nonSmokingAreas.isNotEmpty ||
+      if (_visibleSmokingAreas.isNotEmpty ||
+          _visibleNonSmokingAreas.isNotEmpty ||
           _visibleRegions.isNotEmpty ||
           prevZoom >= kMinDistrictZoom) {
         setState(() {
-          _smokingAreas = [];
-          _nonSmokingAreas = [];
+          _visibleSmokingAreas = [];
+          _visibleNonSmokingAreas = [];
           _visibleRegions = [];
         });
       }
@@ -189,7 +259,6 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     }
   }
 
-  // 현재 화면에 들어오는 시·군·구 목록 즉시 계산 (중간 축소 상태)
   void _updateVisibleDistrictsImmediate(MapCamera camera) {
     final bounds = camera.visibleBounds;
 
@@ -205,7 +274,6 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     });
   }
 
-  // 현재 화면에 들어오는 17개 광역시·도 목록 즉시 계산 (많이 축소했을 때)
   void _updateVisibleProvincesImmediate(MapCamera camera) {
     final bounds = camera.visibleBounds;
 
@@ -221,7 +289,6 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     });
   }
 
-  // 화면에 보이는 시·군·구의 흡연구역/금연구역 개수 비동기 조회 (district_counts 일괄 로드)
   Future<void> _fetchVisibleDistrictCounts() async {
     if (_currentZoom >= kMinAreaZoom) return;
     if (_areaService.cachedRegionCounts.length >= kKoreaDistricts.length) return;
@@ -232,50 +299,109 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     }
   }
 
+  // 현재 필터 기준으로 캐시된 타일 데이터를 즉시(0ms) 화면에 반영
+  // 반환값: 필요한 모든 타일이 이미 캐시에 존재하는지 여부
+  bool _applyCachedVisibleAreas(LatLngBounds bounds) {
+    final needSmoking = _currentFilter != AreaFilterType.nonSmokingOnly;
+    final needNonSmoking = _currentFilter != AreaFilterType.smokingOnly;
+
+    final smokingCache = needSmoking
+        ? _areaService.getCachedAreasInBounds(
+            isNonSmoking: false,
+            minLat: bounds.south,
+            maxLat: bounds.north,
+            minLng: bounds.west,
+            maxLng: bounds.east,
+            limit: 150,
+          )
+        : (areas: _visibleSmokingAreas, allTilesCached: true);
+
+    final nonSmokingCache = needNonSmoking
+        ? _areaService.getCachedAreasInBounds(
+            isNonSmoking: true,
+            minLat: bounds.south,
+            maxLat: bounds.north,
+            minLng: bounds.west,
+            maxLng: bounds.east,
+            limit: 150,
+          )
+        : (areas: _visibleNonSmokingAreas, allTilesCached: true);
+
+    if (smokingCache.areas.isNotEmpty ||
+        nonSmokingCache.areas.isNotEmpty ||
+        (smokingCache.allTilesCached && nonSmokingCache.allTilesCached)) {
+      setState(() {
+        if (needSmoking) _visibleSmokingAreas = smokingCache.areas;
+        if (needNonSmoking) _visibleNonSmokingAreas = nonSmokingCache.areas;
+      });
+    }
+
+    return smokingCache.allTilesCached && nonSmokingCache.allTilesCached;
+  }
+
   Future<void> _fetchVisibleAreas() async {
     if (_currentZoom < kMinAreaZoom) return;
 
+    final seq = ++_viewportFetchSeq;
     final bounds = _mapController.camera.visibleBounds;
     final minLat = bounds.south;
     final maxLat = bounds.north;
     final minLng = bounds.west;
     final maxLng = bounds.east;
 
-    final results = await Future.wait([
-      _areaService.loadSmokingAreasInBounds(
-        minLat: minLat,
-        maxLat: maxLat,
-        minLng: minLng,
-        maxLng: maxLng,
-        limit: 150,
-      ),
-      _areaService.loadNonSmokingAreasInBounds(
-        minLat: minLat,
-        maxLat: maxLat,
-        minLng: minLng,
-        maxLng: maxLng,
-        limit: 150,
-      ),
+    final needSmoking = _currentFilter != AreaFilterType.nonSmokingOnly;
+    final needNonSmoking = _currentFilter != AreaFilterType.smokingOnly;
+
+    final futures = await Future.wait([
+      needSmoking
+          ? _areaService.loadSmokingAreasInBounds(
+              minLat: minLat,
+              maxLat: maxLat,
+              minLng: minLng,
+              maxLng: maxLng,
+              limit: 150,
+            )
+          : Future.value(_visibleSmokingAreas),
+      needNonSmoking
+          ? _areaService.loadNonSmokingAreasInBounds(
+              minLat: minLat,
+              maxLat: maxLat,
+              minLng: minLng,
+              maxLng: maxLng,
+              limit: 150,
+            )
+          : Future.value(_visibleNonSmokingAreas),
     ]);
 
-    if (mounted && _currentZoom >= kMinAreaZoom) {
+    // 최신 요청이 아니면(이미 지도가 다른 곳으로 이동했으면) 무시
+    if (mounted && _currentZoom >= kMinAreaZoom && seq == _viewportFetchSeq) {
       setState(() {
-        _smokingAreas = results[0];
-        _nonSmokingAreas = results[1];
-        if (_currentPosition != null) {
-          _evaluateUserLocation(_currentPosition!);
-        }
+        if (needSmoking) _visibleSmokingAreas = futures[0];
+        if (needNonSmoking) _visibleNonSmokingAreas = futures[1];
       });
+    }
+  }
+
+  void _moveToPointAndLoadAreas(LatLng target, double zoom) {
+    _boundsDebounceTimer?.cancel();
+    setState(() {
+      _currentZoom = zoom;
+      _visibleRegions = [];
+      _visibleProvinces = [];
+    });
+    _mapController.move(target, zoom);
+    final allCached = _applyCachedVisibleAreas(_mapController.camera.visibleBounds);
+    if (!allCached) {
+      _fetchVisibleAreas();
     }
   }
 
   void _moveToUserLocation() {
     if (_currentPosition != null) {
-      _mapController.move(
+      _moveToPointAndLoadAreas(
         LatLng(_currentPosition!.latitude, _currentPosition!.longitude),
         17.0,
       );
-      _fetchVisibleAreas();
     }
   }
 
@@ -337,6 +463,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
+      isScrollControlled: true,
       builder: (context) => AreaDetailSheet(
         area: area,
         distanceInMeters: dist,
@@ -344,17 +471,16 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     );
   }
 
-  // 필터 및 줌 레벨에 따라 화면에 렌더링할 구역 목록
   List<SmokingArea> get _displayedAreas {
     if (_currentZoom < kMinAreaZoom) return [];
 
     switch (_currentFilter) {
       case AreaFilterType.smokingOnly:
-        return _smokingAreas;
+        return _visibleSmokingAreas;
       case AreaFilterType.nonSmokingOnly:
-        return _nonSmokingAreas;
+        return _visibleNonSmokingAreas;
       case AreaFilterType.all:
-        return [..._smokingAreas, ..._nonSmokingAreas];
+        return [..._visibleSmokingAreas, ..._visibleNonSmokingAreas];
     }
   }
 
@@ -377,206 +503,309 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     final isClusterMode = _currentZoom < kMinAreaZoom;
 
     return Scaffold(
+      backgroundColor: SketchColors.paper,
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? NotebookPaperBackground(
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const CircularProgressIndicator(color: SketchColors.ink),
+                    const SizedBox(height: 14),
+                    Text(
+                      '지도를 그리는 중...',
+                      style: SketchTextStyles.title(size: 22),
+                    ),
+                  ],
+                ),
+              ),
+            )
           : Stack(
               children: [
                 // 1. 메인 지도 (전체화면)
                 _buildMapView(userLatLng),
 
-                // 2. 상단 상태 배너 & 필터 칩
+                // 2. 상단 상태 배너 & 손그림 필터 칩
                 Positioned(
                   top: 0,
                   left: 0,
                   right: 0,
                   child: SafeArea(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          StatusBanner(
-                            checkResult: _checkResult,
-                            onTap: () {
-                              final targetArea = _checkResult?.isInsideSmokingArea == true
-                                  ? _checkResult?.currentSmokingArea
-                                  : _checkResult?.isInsideNonSmokingArea == true
-                                      ? _checkResult?.currentNonSmokingArea
-                                      : _checkResult?.nearestSmokingArea;
-                              if (targetArea != null) {
-                                _mapController.move(
-                                  LatLng(targetArea.latitude, targetArea.longitude),
-                                  17.5,
-                                );
-                                _showAreaDetails(targetArea);
-                              }
-                            },
+                    child: Align(
+                      alignment: Alignment.topCenter,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 460),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 8.0),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              StatusBanner(
+                                checkResult: _checkResult,
+                                onTap: () {
+                                  final targetArea = _checkResult?.isInsideSmokingArea == true
+                                      ? _checkResult?.currentSmokingArea
+                                      : _checkResult?.isInsideNonSmokingArea == true
+                                          ? _checkResult?.currentNonSmokingArea
+                                          : _checkResult?.nearestSmokingArea;
+                                  if (targetArea != null) {
+                                    _moveToPointAndLoadAreas(
+                                      LatLng(targetArea.latitude, targetArea.longitude),
+                                      17.5,
+                                    );
+                                    _showAreaDetails(targetArea);
+                                  }
+                                },
+                              ),
+                              const SizedBox(height: 10),
+                              _buildFilterChips(),
+                            ],
                           ),
-                          const SizedBox(height: 8),
-
-                          // 3. 구역 필터 칩
-                          _buildFilterChips(),
-                        ],
+                        ),
                       ),
                     ),
                   ),
                 ),
 
-                // 4. 지도를 축소했을 때 단계별 클러스터 안내 툴팁 뱃지
+                // 3. 지도를 축소했을 때 손그림 안내 말풍선
                 if (isClusterMode)
                   Positioned(
                     bottom: 24,
-                    left: 20,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF0F172A).withOpacity(0.88),
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: const [
-                          BoxShadow(
-                            color: Colors.black26,
-                            blurRadius: 8,
-                            offset: Offset(0, 3),
+                    left: 16,
+                    right: 84,
+                    child: Align(
+                      alignment: Alignment.bottomLeft,
+                      child: Transform.rotate(
+                        angle: -0.012,
+                        child: SketchBox(
+                          fillColor: SketchColors.paperWarm,
+                          borderColor: SketchColors.ink,
+                          shadowColor: SketchColors.ink,
+                          strokeWidth: 2.0,
+                          cornerRadius: 16,
+                          shadowOffset: const Offset(3, 3.5),
+                          seed: 205,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const SketchIcon(
+                                glyph: SketchGlyph.touch,
+                                size: 18,
+                                color: SketchColors.smokeAmber,
+                                strokeWidth: 2.2,
+                              ),
+                              const SizedBox(width: 7),
+                              Flexible(
+                                child: Text(
+                                  _currentZoom < kMinDistrictZoom
+                                      ? '시·도 스티커를 누르면 시·군·구로 확대돼요!'
+                                      : '시·군·구 스티커를 누르면 구역이 보여요!',
+                                  style: SketchTextStyles.label(
+                                    size: 14.5,
+                                    color: SketchColors.ink,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.touch_app, color: Colors.orangeAccent, size: 17),
-                          const SizedBox(width: 6),
-                          Text(
-                            _currentZoom < kMinDistrictZoom
-                                ? '시·도 배지를 누르면 시·군·구 단위로 확대됩니다'
-                                : '시·군·구 배지를 누르면 상세 구역으로 확대됩니다',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
                     ),
                   ),
 
-                // 5. 방위 정렬(나침반) 버튼
+                // 4. 방위 정렬(손그림 나침반) 버튼 (SafeArea 상단 여백 반영해 노치 기기 겹침 방지)
                 Positioned(
-                  top: 175,
+                  top: MediaQuery.paddingOf(context).top + 148,
                   right: 16,
                   child: Tooltip(
-                    message: '방위 정렬 (북쪽 기준)',
+                    message: '북쪽 맞추기',
                     child: _buildCompassButton(),
+                  ),
+                ),
+
+                // 5. 우측 하단 손그림 줌 / 내 위치 컨트롤 버튼
+                Positioned(
+                  right: 16,
+                  bottom: 24,
+                  child: SafeArea(
+                    top: false,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Tooltip(
+                          message: '확대',
+                          child: SketchCircle(
+                            size: 46,
+                            fillColor: SketchColors.paper,
+                            borderColor: SketchColors.ink,
+                            strokeWidth: 2.2,
+                            shadowOffset: const Offset(2.5, 3),
+                            seed: 301,
+                            onTap: () {
+                              final currentZoom = _mapController.camera.zoom;
+                              _mapController.move(_mapController.camera.center, currentZoom + 1);
+                            },
+                            child: const SketchIcon(
+                              glyph: SketchGlyph.plus,
+                              size: 20,
+                              color: SketchColors.ink,
+                              strokeWidth: 2.6,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Tooltip(
+                          message: '축소',
+                          child: SketchCircle(
+                            size: 46,
+                            fillColor: SketchColors.paper,
+                            borderColor: SketchColors.ink,
+                            strokeWidth: 2.2,
+                            shadowOffset: const Offset(2.5, 3),
+                            seed: 302,
+                            onTap: () {
+                              final currentZoom = _mapController.camera.zoom;
+                              _mapController.move(_mapController.camera.center, currentZoom - 1);
+                            },
+                            child: const SketchIcon(
+                              glyph: SketchGlyph.minus,
+                              size: 20,
+                              color: SketchColors.ink,
+                              strokeWidth: 2.6,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Tooltip(
+                          message: '내 위치로 이동',
+                          child: SketchCircle(
+                            size: 56,
+                            fillColor: SketchColors.smokeYellow,
+                            borderColor: SketchColors.ink,
+                            strokeWidth: 2.5,
+                            shadowOffset: const Offset(3, 4),
+                            seed: 303,
+                            onTap: _moveToUserLocation,
+                            child: const SketchIcon(
+                              glyph: SketchGlyph.target,
+                              size: 26,
+                              color: SketchColors.ink,
+                              strokeWidth: 2.4,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
             ),
-      floatingActionButton: Column(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          FloatingActionButton.small(
-            heroTag: 'zoomIn',
-            backgroundColor: Colors.white,
-            foregroundColor: Colors.black87,
-            onPressed: () {
-              final currentZoom = _mapController.camera.zoom;
-              _mapController.move(_mapController.camera.center, currentZoom + 1);
-            },
-            child: const Icon(Icons.add),
-          ),
-          const SizedBox(height: 8),
-          FloatingActionButton.small(
-            heroTag: 'zoomOut',
-            backgroundColor: Colors.white,
-            foregroundColor: Colors.black87,
-            onPressed: () {
-              final currentZoom = _mapController.camera.zoom;
-              _mapController.move(_mapController.camera.center, currentZoom - 1);
-            },
-            child: const Icon(Icons.remove),
-          ),
-          const SizedBox(height: 8),
-          FloatingActionButton(
-            heroTag: 'myLocation',
-            backgroundColor: const Color(0xFF2563EB),
-            foregroundColor: Colors.white,
-            onPressed: _moveToUserLocation,
-            child: const Icon(Icons.my_location),
-          ),
-        ],
-      ),
     );
   }
 
   Widget _buildFilterChips() {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          _buildChip(
-            label: '전체',
-            filterType: AreaFilterType.all,
-            activeColor: const Color(0xFF1E293B),
-          ),
-          const SizedBox(width: 8),
-          _buildChip(
-            label: '🚬 흡연구역',
-            filterType: AreaFilterType.smokingOnly,
-            activeColor: const Color(0xFFD97706),
-          ),
-          const SizedBox(width: 8),
-          _buildChip(
-            label: '🚫 금연구역',
-            filterType: AreaFilterType.nonSmokingOnly,
-            activeColor: const Color(0xFFDC2626),
-          ),
-        ],
+      clipBehavior: Clip.none,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 2),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _buildChip(
+              label: '전체보기',
+              filterType: AreaFilterType.all,
+              selectedFill: SketchColors.ink,
+              selectedText: SketchColors.paper,
+              borderColor: SketchColors.ink,
+              angle: -0.015,
+              seed: 401,
+            ),
+            const SizedBox(width: 10),
+            _buildChip(
+              label: '흡연구역',
+              iconAsset: 'assets/images/doodle_smoke.png',
+              filterType: AreaFilterType.smokingOnly,
+              selectedFill: SketchColors.smokeYellow,
+              selectedText: SketchColors.ink,
+              borderColor: SketchColors.smokeAmber,
+              angle: 0.014,
+              seed: 402,
+            ),
+            const SizedBox(width: 10),
+            _buildChip(
+              label: '금연구역',
+              iconAsset: 'assets/images/doodle_no_smoke.png',
+              filterType: AreaFilterType.nonSmokingOnly,
+              selectedFill: SketchColors.noSmokeFill,
+              selectedText: SketchColors.noSmokeDark,
+              borderColor: SketchColors.noSmokeRed,
+              angle: -0.012,
+              seed: 403,
+            ),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildChip({
     required String label,
+    String? iconAsset,
     required AreaFilterType filterType,
-    required Color activeColor,
+    required Color selectedFill,
+    required Color selectedText,
+    required Color borderColor,
+    required double angle,
+    required int seed,
   }) {
     final isSelected = _currentFilter == filterType;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
+    return Transform.rotate(
+      angle: angle,
+      child: SketchBox(
+        fillColor: isSelected ? selectedFill : SketchColors.paper,
+        borderColor: isSelected ? SketchColors.ink : borderColor,
+        shadowColor: SketchColors.ink,
+        strokeWidth: isSelected ? 2.3 : 1.7,
+        cornerRadius: 18,
+        shadowOffset: isSelected ? const Offset(2.5, 3.0) : const Offset(1.5, 2.0),
+        doubleStroke: isSelected,
+        seed: seed,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         onTap: () {
           setState(() {
             _currentFilter = filterType;
           });
+          // 필터 전환 시 아직 불러오지 않은 테이블 데이터가 있으면 즉시 조회
+          if (_currentZoom >= kMinAreaZoom) {
+            final allCached = _applyCachedVisibleAreas(_mapController.camera.visibleBounds);
+            if (!allCached) {
+              _fetchVisibleAreas();
+            }
+          }
         },
-        borderRadius: BorderRadius.circular(20),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: isSelected ? activeColor : Colors.white.withOpacity(0.92),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: isSelected ? activeColor : Colors.black12,
-              width: 1.2,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.12),
-                blurRadius: 4,
-                offset: const Offset(0, 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (iconAsset != null) ...[
+              Image.asset(
+                iconAsset,
+                width: 19,
+                height: 19,
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) => const SizedBox(),
               ),
+              const SizedBox(width: 5),
             ],
-          ),
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
-              color: isSelected ? Colors.white : const Color(0xFF334155),
+            Text(
+              label,
+              style: SketchTextStyles.label(
+                size: 15.5,
+                color: isSelected ? selectedText : SketchColors.ink,
+              ),
             ),
-          ),
+          ],
         ),
       ),
     );
@@ -610,9 +839,15 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
           userAgentPackageName: 'com.example.smoke_finder',
           tileProvider: NetworkTileProvider(),
+          tileBuilder: (context, tileWidget, tile) {
+            return ColorFiltered(
+              colorFilter: _warmPaperMapFilter,
+              child: tileWidget,
+            );
+          },
         ),
 
-        // 원형 반경 레이어 (확대 모드일 때만)
+        // 원형 반경 레이어 (색연필/형광펜 느낌의 파스텔 원)
         if (!isClusterMode)
           CircleLayer(
             circles: displayAreas.map((area) {
@@ -625,10 +860,10 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                   radius: area.radius,
                   useRadiusInMeter: true,
                   color: isInsideNonSmoking
-                      ? const Color(0xFFDC2626).withOpacity(0.40)
-                      : const Color(0xFFEF4444).withOpacity(0.18),
-                  borderColor: const Color(0xFFDC2626),
-                  borderStrokeWidth: isInsideNonSmoking ? 3.0 : 1.5,
+                      ? SketchColors.noSmokeRed.withOpacity(0.36)
+                      : SketchColors.noSmokeRed.withOpacity(0.16),
+                  borderColor: SketchColors.noSmokeRed,
+                  borderStrokeWidth: isInsideNonSmoking ? 3.2 : 1.8,
                 );
               } else {
                 return CircleMarker(
@@ -636,54 +871,54 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                   radius: area.radius,
                   useRadiusInMeter: true,
                   color: isInsideSmoking
-                      ? Colors.green.withOpacity(0.45)
-                      : Colors.orange.withOpacity(0.25),
-                  borderColor: isInsideSmoking ? Colors.green : Colors.orange,
-                  borderStrokeWidth: isInsideSmoking ? 3.0 : 1.5,
+                      ? SketchColors.safeGreen.withOpacity(0.38)
+                      : SketchColors.smokeYellow.withOpacity(0.32),
+                  borderColor: isInsideSmoking ? SketchColors.safeGreen : SketchColors.smokeAmber,
+                  borderStrokeWidth: isInsideSmoking ? 3.2 : 1.8,
                 );
               }
             }).toList(),
           ),
 
-        // 마커 레이어 (내 위치 + 3단계 줌 레벨별 배지/마커)
+        // 마커 레이어 (내 위치 + 3단계 줌 레벨별 손그림 배지/마커)
         MarkerLayer(
           rotate: true,
           markers: [
             Marker(
               point: userLatLng,
-              width: 50,
-              height: 50,
+              width: 52,
+              height: 52,
               rotate: true,
               child: _buildUserLocationMarker(),
             ),
 
-            // 1. 많이 축소 시 (zoom < 11.0): 17개 광역시·도 통합 클러스터 배지
+            // 1. 많이 축소 시 (zoom < 11.0): 17개 광역시·도 통합 클러스터 스티커
             if (isProvinceMode)
               ..._visibleProvinces.map((province) {
                 final counts = _areaService.getProvinceCounts(province.sidoKey);
                 return Marker(
                   point: LatLng(province.latitude, province.longitude),
-                  width: 124,
-                  height: 62,
+                  width: 136,
+                  height: 68,
                   rotate: true,
                   child: _buildProvinceClusterBadge(province, counts),
                 );
               }),
 
-            // 2. 중간 축소 시 (11.0 <= zoom < 15.0): 시·군·구 클러스터 배지
+            // 2. 중간 축소 시 (11.0 <= zoom < 15.0): 시·군·구 클러스터 스티커
             if (isDistrictMode)
               ..._visibleRegions.map((region) {
                 final counts = _areaService.cachedRegionCounts[region.code];
                 return Marker(
                   point: LatLng(region.latitude, region.longitude),
-                  width: 118,
-                  height: 60,
+                  width: 130,
+                  height: 66,
                   rotate: true,
                   child: _buildDistrictClusterBadge(region, counts),
                 );
               }),
 
-            // 3. 확대 시 (zoom >= 15.0): 개별 흡연구역 / 금연구역 마커
+            // 3. 확대 시 (zoom >= 15.0): 개별 흡연구역 / 금연구역 손그림 마커
             if (!isClusterMode)
               ...displayAreas.map((area) {
                 final isCurrent = area.isNonSmoking
@@ -691,12 +926,16 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                     : _checkResult?.currentSmokingArea?.id == area.id;
 
                 final borderColor = area.isNonSmoking
-                    ? (isCurrent ? const Color(0xFF991B1B) : const Color(0xFFDC2626))
-                    : (isCurrent ? const Color(0xFF2E7D32) : const Color(0xFFD97706));
+                    ? (isCurrent ? SketchColors.noSmokeDark : SketchColors.noSmokeRed)
+                    : (isCurrent ? SketchColors.safeGreen : SketchColors.smokeAmber);
+
+                final fillColor = isCurrent
+                    ? (area.isNonSmoking ? SketchColors.noSmokeFill : SketchColors.safeFill)
+                    : SketchColors.paper;
 
                 final iconAsset = area.isNonSmoking
-                    ? 'assets/images/no_smoke.png'
-                    : 'assets/images/app_logo.png';
+                    ? 'assets/images/doodle_no_smoke.png'
+                    : 'assets/images/doodle_smoke.png';
 
                 final fallbackIcon = area.isNonSmoking
                     ? Icons.smoke_free
@@ -704,37 +943,27 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
 
                 return Marker(
                   point: LatLng(area.latitude, area.longitude),
-                  width: 44,
-                  height: 44,
+                  width: isCurrent ? 54 : 48,
+                  height: isCurrent ? 54 : 48,
                   rotate: true,
-                  child: GestureDetector(
+                  child: SketchCircle(
+                    size: isCurrent ? 50 : 44,
+                    fillColor: fillColor,
+                    borderColor: borderColor,
+                    shadowColor: SketchColors.ink,
+                    strokeWidth: isCurrent ? 2.8 : 2.1,
+                    shadowOffset: const Offset(2, 2.5),
+                    seed: area.id.hashCode,
                     onTap: () => _showAreaDetails(area),
-                    child: Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        shape: BoxShape.circle,
-                        boxShadow: const [
-                          BoxShadow(
-                            color: Colors.black26,
-                            blurRadius: 6,
-                            offset: Offset(0, 2),
-                          ),
-                        ],
-                        border: Border.all(
+                    child: Padding(
+                      padding: const EdgeInsets.all(5),
+                      child: Image.asset(
+                        iconAsset,
+                        fit: BoxFit.contain,
+                        errorBuilder: (context, error, stackTrace) => Icon(
+                          fallbackIcon,
                           color: borderColor,
-                          width: isCurrent ? 3.0 : 2.0,
-                        ),
-                      ),
-                      child: ClipOval(
-                        child: Image.asset(
-                          iconAsset,
-                          fit: BoxFit.contain,
-                          errorBuilder: (context, error, stackTrace) => Icon(
-                            fallbackIcon,
-                            color: borderColor,
-                            size: 22,
-                          ),
+                          size: 20,
                         ),
                       ),
                     ),
@@ -747,139 +976,120 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     );
   }
 
-  // 광역시·도 묶음(클러스터) 배지 위젯 (줌 11.0 미만)
+  // 광역시·도 손그림 스티커 배지 (줌 11.0 미만)
   Widget _buildProvinceClusterBadge(
     ProvinceRegion province,
     ({int smokingCount, int nonSmokingCount})? counts,
   ) {
     final borderColor = switch (_currentFilter) {
-      AreaFilterType.smokingOnly => const Color(0xFFD97706),
-      AreaFilterType.nonSmokingOnly => const Color(0xFFDC2626),
-      AreaFilterType.all => const Color(0xFF1E293B),
+      AreaFilterType.smokingOnly => SketchColors.smokeAmber,
+      AreaFilterType.nonSmokingOnly => SketchColors.noSmokeRed,
+      AreaFilterType.all => SketchColors.ink,
     };
 
-    return GestureDetector(
-      onTap: () {
-        _mapController.move(
-          LatLng(province.latitude, province.longitude),
-          province.targetZoom,
-        );
-      },
-      child: Center(
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.96),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: borderColor, width: 1.6),
-            boxShadow: const [
-              BoxShadow(
-                color: Colors.black26,
-                blurRadius: 6,
-                offset: Offset(0, 2),
+    return Center(
+      child: SketchBox(
+        fillColor: SketchColors.paper,
+        borderColor: borderColor,
+        shadowColor: SketchColors.ink,
+        strokeWidth: 2.0,
+        cornerRadius: 14,
+        shadowOffset: const Offset(2.5, 3.0),
+        doubleStroke: false,
+        seed: province.sidoKey.hashCode,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        onTap: () {
+          _mapController.move(
+            LatLng(province.latitude, province.longitude),
+            province.targetZoom,
+          );
+        },
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              province.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: SketchTextStyles.label(
+                size: 15,
+                color: SketchColors.ink,
               ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                province.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF0F172A),
-                  height: 1.1,
+            ),
+            const SizedBox(height: 2),
+            if (counts == null)
+              const SizedBox(
+                width: 12,
+                height: 12,
+                child: CircularProgressIndicator(
+                  strokeWidth: 1.8,
+                  color: SketchColors.inkMuted,
                 ),
+              )
+            else
+              _buildCountRowByValues(
+                smokingCount: counts.smokingCount,
+                nonSmokingCount: counts.nonSmokingCount,
               ),
-              const SizedBox(height: 3),
-              if (counts == null)
-                const SizedBox(
-                  width: 12,
-                  height: 12,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 1.8,
-                    color: Color(0xFF64748B),
-                  ),
-                )
-              else
-                _buildCountRowByValues(
-                  smokingCount: counts.smokingCount,
-                  nonSmokingCount: counts.nonSmokingCount,
-                  isDarkBadge: false,
-                ),
-            ],
-          ),
+          ],
         ),
       ),
     );
   }
 
-  // 시·군·구 지역 묶음(클러스터) 배지 위젯 (줌 11.0 ~ 15.0 미만)
+  // 시·군·구 손그림 스티커 배지 (줌 11.0 ~ 15.0 미만)
   Widget _buildDistrictClusterBadge(DistrictRegion region, RegionCounts? counts) {
     final borderColor = switch (_currentFilter) {
-      AreaFilterType.smokingOnly => const Color(0xFFD97706),
-      AreaFilterType.nonSmokingOnly => const Color(0xFFDC2626),
-      AreaFilterType.all => const Color(0xFF1E293B),
+      AreaFilterType.smokingOnly => SketchColors.smokeAmber,
+      AreaFilterType.nonSmokingOnly => SketchColors.noSmokeRed,
+      AreaFilterType.all => SketchColors.ink,
     };
 
-    return GestureDetector(
-      onTap: () {
-        _mapController.move(
-          LatLng(region.latitude, region.longitude),
-          15.5,
-        );
-        _fetchVisibleAreas();
-      },
-      child: Center(
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.96),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: borderColor, width: 1.6),
-            boxShadow: const [
-              BoxShadow(
-                color: Colors.black26,
-                blurRadius: 6,
-                offset: Offset(0, 2),
+    return Center(
+      child: SketchBox(
+        fillColor: SketchColors.paperWarm,
+        borderColor: borderColor,
+        shadowColor: SketchColors.ink,
+        strokeWidth: 1.9,
+        cornerRadius: 13,
+        shadowOffset: const Offset(2, 2.5),
+        doubleStroke: false,
+        seed: region.code.hashCode,
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+        onTap: () {
+          _moveToPointAndLoadAreas(
+            LatLng(region.latitude, region.longitude),
+            15.5,
+          );
+        },
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              region.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: SketchTextStyles.label(
+                size: 14.5,
+                color: SketchColors.ink,
               ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                region.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF0F172A),
-                  height: 1.1,
+            ),
+            const SizedBox(height: 2),
+            if (counts == null)
+              const SizedBox(
+                width: 12,
+                height: 12,
+                child: CircularProgressIndicator(
+                  strokeWidth: 1.8,
+                  color: SketchColors.inkMuted,
                 ),
+              )
+            else
+              _buildCountRowByValues(
+                smokingCount: counts.smokingCount,
+                nonSmokingCount: counts.nonSmokingCount,
               ),
-              const SizedBox(height: 3),
-              if (counts == null)
-                const SizedBox(
-                  width: 12,
-                  height: 12,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 1.8,
-                    color: Color(0xFF64748B),
-                  ),
-                )
-              else
-                _buildCountRowByValues(
-                  smokingCount: counts.smokingCount,
-                  nonSmokingCount: counts.nonSmokingCount,
-                  isDarkBadge: false,
-                ),
-            ],
-          ),
+          ],
         ),
       ),
     );
@@ -888,59 +1098,76 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
   Widget _buildCountRowByValues({
     required int smokingCount,
     required int nonSmokingCount,
-    bool isDarkBadge = false,
   }) {
-    final smokingColor = isDarkBadge ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
-    final nonSmokingColor = isDarkBadge ? const Color(0xFFF87171) : const Color(0xFFDC2626);
+    Widget miniIcon(String asset) => Image.asset(
+          asset,
+          width: 14,
+          height: 14,
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stackTrace) => const SizedBox(),
+        );
 
     switch (_currentFilter) {
       case AreaFilterType.smokingOnly:
-        return Text(
-          '🚬 ${_formatCount(smokingCount)}',
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-            color: smokingColor,
-          ),
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            miniIcon('assets/images/doodle_smoke.png'),
+            const SizedBox(width: 3),
+            Text(
+              _formatCount(smokingCount),
+              style: SketchTextStyles.label(
+                size: 13.5,
+                color: SketchColors.smokeAmber,
+              ),
+            ),
+          ],
         );
       case AreaFilterType.nonSmokingOnly:
-        return Text(
-          '🚫 ${_formatCount(nonSmokingCount)}',
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-            color: nonSmokingColor,
-          ),
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            miniIcon('assets/images/doodle_no_smoke.png'),
+            const SizedBox(width: 3),
+            Text(
+              _formatCount(nonSmokingCount),
+              style: SketchTextStyles.label(
+                size: 13.5,
+                color: SketchColors.noSmokeRed,
+              ),
+            ),
+          ],
         );
       case AreaFilterType.all:
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            miniIcon('assets/images/doodle_smoke.png'),
+            const SizedBox(width: 2),
             Text(
-              '🚬${_formatCount(smokingCount)}',
-              style: TextStyle(
-                fontSize: 10.5,
-                fontWeight: FontWeight.w700,
-                color: smokingColor,
+              _formatCount(smokingCount),
+              style: SketchTextStyles.label(
+                size: 13,
+                color: SketchColors.smokeAmber,
               ),
             ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 3),
               child: Text(
-                '·',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  color: isDarkBadge ? Colors.white54 : const Color(0xFF94A3B8),
+                '/',
+                style: SketchTextStyles.label(
+                  size: 12,
+                  color: SketchColors.inkLight,
                 ),
               ),
             ),
+            miniIcon('assets/images/doodle_no_smoke.png'),
+            const SizedBox(width: 2),
             Text(
-              '🚫${_formatCount(nonSmokingCount)}',
-              style: TextStyle(
-                fontSize: 10.5,
-                fontWeight: FontWeight.w700,
-                color: nonSmokingColor,
+              _formatCount(nonSmokingCount),
+              style: SketchTextStyles.label(
+                size: 13,
+                color: SketchColors.noSmokeRed,
               ),
             ),
           ],
@@ -956,38 +1183,19 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
   }
 
   Widget _buildCompassButton() {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: _resetRotation,
-        borderRadius: BorderRadius.circular(24),
-        child: Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            shape: BoxShape.circle,
-            boxShadow: const [
-              BoxShadow(
-                color: Colors.black26,
-                blurRadius: 6,
-                offset: Offset(0, 2),
-              ),
-            ],
-            border: Border.all(
-              color: Colors.black12,
-              width: 1,
-            ),
-          ),
-          child: Center(
-            child: Transform.rotate(
-              angle: _currentRotation * (math.pi / 180.0),
-              child: CustomPaint(
-                size: const Size(26, 26),
-                painter: _CompassNeedlePainter(),
-              ),
-            ),
-          ),
+    return SketchCircle(
+      size: 46,
+      fillColor: SketchColors.paper,
+      borderColor: SketchColors.ink,
+      strokeWidth: 2.2,
+      shadowOffset: const Offset(2.5, 3),
+      seed: 501,
+      onTap: _resetRotation,
+      child: Transform.rotate(
+        angle: _currentRotation * (math.pi / 180.0),
+        child: CustomPaint(
+          size: const Size(28, 28),
+          painter: _SketchCompassNeedlePainter(),
         ),
       ),
     );
@@ -997,99 +1205,85 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     return Stack(
       alignment: Alignment.center,
       children: [
-        Container(
-          width: 38,
-          height: 38,
-          decoration: BoxDecoration(
-            color: Colors.blue.withOpacity(0.25),
-            shape: BoxShape.circle,
-          ),
+        SketchCircle(
+          size: 40,
+          fillColor: SketchColors.bluePen.withOpacity(0.18),
+          borderColor: SketchColors.bluePen.withOpacity(0.65),
+          shadowOffset: Offset.zero,
+          strokeWidth: 1.6,
+          seed: 601,
+          child: const SizedBox(),
         ),
-        Container(
-          width: 18,
-          height: 18,
-          decoration: BoxDecoration(
-            color: const Color(0xFF2563EB),
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white, width: 3),
-            boxShadow: const [
-              BoxShadow(
-                color: Colors.black26,
-                blurRadius: 4,
-                offset: Offset(0, 2),
-              ),
-            ],
-          ),
+        SketchCircle(
+          size: 20,
+          fillColor: SketchColors.bluePen,
+          borderColor: SketchColors.paper,
+          shadowColor: SketchColors.ink,
+          shadowOffset: const Offset(1.5, 2),
+          strokeWidth: 2.4,
+          seed: 602,
+          child: const SizedBox(),
         ),
       ],
     );
   }
 }
 
-class _CompassNeedlePainter extends CustomPainter {
+/// 자 없이 펜으로 대충 그린 나침반 바늘
+class _SketchCompassNeedlePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
-    final centerX = size.width / 2;
-    final centerY = size.height / 2;
-    final halfWidth = size.width * 0.22;
+    final cx = size.width / 2;
+    final cy = size.height / 2;
+    final hw = size.width * 0.24;
 
-    // 북쪽(N) 바늘
+    // 북쪽(빨간 사인펜 칠하기)
     final northPath = Path()
-      ..moveTo(centerX, 2)
-      ..lineTo(centerX + halfWidth, centerY)
-      ..lineTo(centerX, centerY - 1)
-      ..lineTo(centerX - halfWidth, centerY)
+      ..moveTo(cx + 0.5, 2)
+      ..lineTo(cx + hw, cy + 0.5)
+      ..lineTo(cx - hw + 0.5, cy - 0.5)
       ..close();
+    canvas.drawPath(
+      northPath,
+      Paint()
+        ..color = SketchColors.noSmokeRed
+        ..style = PaintingStyle.fill,
+    );
 
-    final northPaint = Paint()
-      ..color = const Color(0xFFEF4444)
-      ..style = PaintingStyle.fill;
-    canvas.drawPath(northPath, northPaint);
-
-    final northRightPath = Path()
-      ..moveTo(centerX, 2)
-      ..lineTo(centerX + halfWidth, centerY)
-      ..lineTo(centerX, centerY)
-      ..close();
-    final northDarkPaint = Paint()
-      ..color = const Color(0xFFDC2626)
-      ..style = PaintingStyle.fill;
-    canvas.drawPath(northRightPath, northDarkPaint);
-
-    // 남쪽(S) 바늘
+    // 남쪽(연필 회색)
     final southPath = Path()
-      ..moveTo(centerX, size.height - 2)
-      ..lineTo(centerX + halfWidth, centerY)
-      ..lineTo(centerX, centerY + 1)
-      ..lineTo(centerX - halfWidth, centerY)
+      ..moveTo(cx - 0.5, size.height - 2)
+      ..lineTo(cx + hw, cy + 0.5)
+      ..lineTo(cx - hw + 0.5, cy - 0.5)
       ..close();
+    canvas.drawPath(
+      southPath,
+      Paint()
+        ..color = SketchColors.paperWarm
+        ..style = PaintingStyle.fill,
+    );
 
-    final southPaint = Paint()
-      ..color = const Color(0xFF94A3B8)
-      ..style = PaintingStyle.fill;
-    canvas.drawPath(southPath, southPaint);
-
-    final southRightPath = Path()
-      ..moveTo(centerX, size.height - 2)
-      ..lineTo(centerX + halfWidth, centerY)
-      ..lineTo(centerX, centerY)
-      ..close();
-    final southDarkPaint = Paint()
-      ..color = const Color(0xFF64748B)
-      ..style = PaintingStyle.fill;
-    canvas.drawPath(southRightPath, southDarkPaint);
-
-    // 중앙 축 핀
-    final centerPaint = Paint()
-      ..color = Colors.white
-      ..style = PaintingStyle.fill;
-    canvas.drawCircle(Offset(centerX, centerY), 2.5, centerPaint);
-
-    final centerBorderPaint = Paint()
-      ..color = const Color(0xFF334155)
+    // 검정 펜 외곽선
+    final outline = Paint()
+      ..color = SketchColors.ink
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.0;
-    canvas.drawCircle(Offset(centerX, centerY), 2.5, centerBorderPaint);
+      ..strokeWidth = 1.8
+      ..strokeJoin = StrokeJoin.round
+      ..strokeCap = StrokeCap.round;
+    canvas.drawPath(northPath, outline);
+    canvas.drawPath(southPath, outline);
+
+    // 중앙 점
+    canvas.drawCircle(
+      Offset(cx, cy),
+      2.6,
+      Paint()..color = SketchColors.paper,
+    );
+    canvas.drawCircle(
+      Offset(cx, cy),
+      2.6,
+      outline..strokeWidth = 1.4,
+    );
   }
 
   @override

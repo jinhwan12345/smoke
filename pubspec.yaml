@@ -27,3 +27,10 @@ flutter:
   uses-material-design: true
   assets:
     - assets/images/
+  fonts:
+    - family: Gaegu
+      fonts:
+        - asset: assets/fonts/Gaegu-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Gaegu-Bold.ttf
+          weight: 700

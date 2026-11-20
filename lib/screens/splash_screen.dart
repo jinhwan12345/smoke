@@ -2,6 +2,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import '../services/location_service.dart';
+import '../services/smoking_area_service.dart';
+import '../theme/sketch_theme.dart';
+import '../widgets/sketch_widgets.dart';
 import 'map_screen.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -14,18 +17,18 @@ class SplashScreen extends StatefulWidget {
 class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
-  final String _statusText = '현재 위치를 확인하는 중...';
+  final String _statusText = '현재 위치를 쓱싹 찾는 중...';
 
   @override
   void initState() {
     super.initState();
     _fadeController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1000),
+      duration: const Duration(milliseconds: 900),
     );
     _fadeAnimation = CurvedAnimation(
       parent: _fadeController,
-      curve: Curves.easeIn,
+      curve: Curves.easeOut,
     );
     _fadeController.forward();
 
@@ -35,23 +38,34 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   Future<void> _initializeApp() async {
     final startTime = DateTime.now();
 
-    // 위치 권한 및 현재 위치 확인 (흡연/금연구역 모두 지도 화면에서 줌 레벨 및 뷰포트에 따라 동적 로딩)
+    // 위치 권한 및 현재 위치 확인
     await LocationService.requestLocationPermission();
     Position initialPos = await LocationService.getCurrentPosition();
 
-    // 경고 문구를 사용자가 충분히 읽을 수 있도록 최소 2.2초 대기
+    // 스플래시 표시 최소 대기 시간(2.2초) 동안 내 주변 구역 및 전국 시·군·구 카운트 사전 로딩
+    final preloadFuture = SmokingAreaService().preloadInitialData(
+      userLat: initialPos.latitude,
+      userLng: initialPos.longitude,
+    );
+
     final elapsed = DateTime.now().difference(startTime);
     const minDisplayDuration = Duration(milliseconds: 2200);
     if (elapsed < minDisplayDuration) {
       await Future.delayed(minDisplayDuration - elapsed);
     }
 
+    // 사전 로딩이 거의 끝났다면 최대 400ms까지만 더 기다린 뒤 즉시 진입
+    await preloadFuture.timeout(
+      const Duration(milliseconds: 400),
+      onTimeout: () {},
+    );
+
     if (!mounted) return;
 
     // 메인 지도 화면으로 부드럽게 전환
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
-        transitionDuration: const Duration(milliseconds: 600),
+        transitionDuration: const Duration(milliseconds: 550),
         pageBuilder: (context, animation, secondaryAnimation) => MapScreen(
           initialPosition: initialPos,
         ),
@@ -71,222 +85,224 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0F172A),
-      body: SafeArea(
-        child: FadeTransition(
-          opacity: _fadeAnimation,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const SizedBox(height: 20),
-
-                // 상단: 앱 로고 및 타이틀
-                Column(
-                  children: [
-                    Container(
-                      width: 90,
-                      height: 90,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.08),
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.orangeAccent.withOpacity(0.3),
-                            blurRadius: 20,
-                            spreadRadius: 2,
-                          ),
-                        ],
-                      ),
-                      child: ClipOval(
-                        child: Image.asset(
-                          'assets/images/app_logo.png',
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) => const Icon(
-                            Icons.smoking_rooms,
-                            size: 48,
-                            color: Colors.orangeAccent,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      '담뱃불좀꺼줄래',
-                      style: TextStyle(
-                        fontSize: 26,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                        letterSpacing: -0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      '스마트 흡연·금연구역 안내 & 길찾기',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.white70,
-                      ),
-                    ),
-                  ],
-                ),
-
-                // 중앙: 흡연 경고 및 건강 안내 카드
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1E293B),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: const Color(0xFFEF4444).withOpacity(0.5),
-                      width: 1.5,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.4),
-                        blurRadius: 15,
-                        offset: const Offset(0, 6),
-                      ),
-                    ],
-                  ),
+      backgroundColor: SketchColors.paper,
+      body: NotebookPaperBackground(
+        showMarginLine: true,
+        showDoodles: true,
+        child: SafeArea(
+          child: FadeTransition(
+            opacity: _fadeAnimation,
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 440),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 18.0),
                   child: Column(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
+                      const SizedBox(height: 8),
+
+                      // 상단: 손그림 로고 및 손글씨 타이틀
+                      Column(
                         children: [
-                          Container(
-                            width: 24,
-                            height: 24,
-                            decoration: const BoxDecoration(
-                              color: Colors.white,
-                              shape: BoxShape.circle,
-                            ),
-                            padding: const EdgeInsets.all(2),
-                            child: ClipOval(
-                              child: Image.asset(
-                                'assets/images/no_smoke.png',
-                                fit: BoxFit.contain,
-                                errorBuilder: (context, error, stackTrace) => const Icon(
-                                  Icons.warning_amber_rounded,
-                                  color: Color(0xFFEF4444),
-                                  size: 20,
+                          Transform.rotate(
+                            angle: -0.04,
+                            child: SketchCircle(
+                              size: 108,
+                              fillColor: SketchColors.smokeFill,
+                              borderColor: SketchColors.ink,
+                              strokeWidth: 2.6,
+                              shadowOffset: const Offset(4, 5),
+                              seed: 11,
+                              child: Padding(
+                                padding: const EdgeInsets.all(10),
+                                child: Image.asset(
+                                  'assets/images/doodle_smoke.png',
+                                  fit: BoxFit.contain,
+                                  errorBuilder: (context, error, stackTrace) => const Icon(
+                                    Icons.smoking_rooms,
+                                    size: 46,
+                                    color: SketchColors.ink,
+                                  ),
                                 ),
                               ),
                             ),
                           ),
-                          const SizedBox(width: 8),
-                          const Text(
-                            '금연 및 건강 경고 안내',
-                            style: TextStyle(
-                              color: Color(0xFFEF4444),
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
+                          const SizedBox(height: 18),
+                          HighlighterText(
+                            text: '담뱃불좀꺼줄래',
+                            highlightColor: SketchColors.smokeYellow,
+                            style: SketchTextStyles.title(
+                              size: 36,
+                              color: SketchColors.ink,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            '내 주변 흡연·금연구역 낙서지도',
+                            style: SketchTextStyles.body(
+                              size: 18,
+                              color: SketchColors.inkMuted,
+                              weight: FontWeight.w700,
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 14),
-                      const Text(
-                        '흡연은 폐암, 뇌졸중, 심혈관 질환 등 각종 치명적인 질병의 주요 원인이 됩니다.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 13.5,
-                          height: 1.5,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        '비흡연자의 간접흡연 피해를 예방하기 위해\n반드시 지정된 흡연구역에서만 흡연해 주세요.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.grey[300],
-                          fontSize: 12.5,
-                          height: 1.4,
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.08),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Text(
-                          '🚭 금연상담전화: 국번없이 1544-9030',
-                          style: TextStyle(
-                            color: Colors.orangeAccent,
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
+
+                      // 중앙: 마스킹테이프가 붙은 흡연 경고 메모지 카드
+                      Stack(
+                        clipBehavior: Clip.none,
+                        alignment: Alignment.topCenter,
+                        children: [
+                          Transform.rotate(
+                            angle: 0.008,
+                            child: SketchBox(
+                              fillColor: SketchColors.noSmokeFill,
+                              borderColor: SketchColors.noSmokeRed,
+                              shadowColor: SketchColors.ink,
+                              strokeWidth: 2.4,
+                              cornerRadius: 18,
+                              shadowOffset: const Offset(4, 5),
+                              showHatchShadow: true,
+                              seed: 33,
+                              padding: const EdgeInsets.fromLTRB(20, 22, 20, 18),
+                              child: Column(
+                                children: [
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      SizedBox(
+                                        width: 64,
+                                        height: 64,
+                                        child: Image.asset(
+                                          'assets/images/doodle_warning.png',
+                                          fit: BoxFit.contain,
+                                          errorBuilder: (context, error, stackTrace) =>
+                                              const SketchIcon(
+                                            glyph: SketchGlyph.warning,
+                                            size: 36,
+                                            color: SketchColors.noSmokeRed,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Flexible(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              '잠깐! 건강 경고!',
+                                              style: SketchTextStyles.title(
+                                                size: 22,
+                                                color: SketchColors.noSmokeRed,
+                                              ),
+                                            ),
+                                            Text(
+                                              '금연 및 간접흡연 주의',
+                                              style: SketchTextStyles.body(
+                                                size: 14,
+                                                color: SketchColors.noSmokeDark,
+                                                weight: FontWeight.w700,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 10),
+                                  const SketchDivider(
+                                    color: SketchColors.noSmokeRed,
+                                    seed: 19,
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Text(
+                                    '흡연은 폐암, 뇌졸중, 심혈관 질환 등\n각종 치명적인 질병의 주요 원인이 됩니다.',
+                                    textAlign: TextAlign.center,
+                                    style: SketchTextStyles.body(
+                                      size: 16.5,
+                                      color: SketchColors.ink,
+                                      weight: FontWeight.w700,
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    '비흡연자의 간접흡연 피해를 예방하기 위해\n반드시 지정된 흡연구역에서만 흡연해 주세요.',
+                                    textAlign: TextAlign.center,
+                                    style: SketchTextStyles.body(
+                                      size: 15,
+                                      color: SketchColors.inkMuted,
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 14),
+                                  SketchBox(
+                                    fillColor: SketchColors.paper,
+                                    borderColor: SketchColors.ink,
+                                    shadowOffset: const Offset(2, 2.5),
+                                    strokeWidth: 1.8,
+                                    cornerRadius: 16,
+                                    doubleStroke: false,
+                                    seed: 47,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 14,
+                                      vertical: 6,
+                                    ),
+                                    child: Text(
+                                      '금연상담전화 : 국번없이 1544-9030',
+                                      style: SketchTextStyles.label(
+                                        size: 15.5,
+                                        color: SketchColors.smokeAmber,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
+                          const Positioned(
+                            top: -11,
+                            child: MaskingTape(
+                              width: 88,
+                              height: 22,
+                              color: SketchColors.tapeColor,
+                              angle: -0.04,
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      // 하단: 로딩 상태
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.5,
+                                color: SketchColors.ink,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Text(
+                              _statusText,
+                              style: SketchTextStyles.body(
+                                size: 17,
+                                color: SketchColors.ink,
+                                weight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
                   ),
                 ),
-
-                // 하단: 로딩 인디케이터 및 상태 & 공공데이터 저작권 표시
-                Column(
-                  children: [
-                    const SizedBox(
-                      width: 28,
-                      height: 28,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.5,
-                        color: Colors.orangeAccent,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    Text(
-                      _statusText,
-                      style: const TextStyle(
-                        color: Colors.white60,
-                        fontSize: 13,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    // 공공데이터 저작권(공공누리 제1유형) 표시
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.08),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.white10),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(2),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(3),
-                            ),
-                            child: Image.asset(
-                              'assets/images/kogl_type1.png',
-                              height: 14,
-                              fit: BoxFit.contain,
-                              errorBuilder: (context, error, stackTrace) => const SizedBox(),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          const Text(
-                            '출처: 공공데이터포털 전국금연구역표준데이터 (공공누리 제1유형)',
-                            style: TextStyle(
-                              color: Colors.white54,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w400,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                  ],
-                ),
-              ],
+              ),
             ),
           ),
         ),
